@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet" />
+    <title>Remarks preview</title>
+  </head>
+  <body>
+    <script>
+      window.fetch = async (path, options = {}) => {
+        const url = String(path);
+        const json = (data) => new Response(JSON.stringify(data), { status: 200, headers: { "Content-Type": "application/json" } });
+        if (url.includes("/accounts/")) {
+          return json({ accounts: [
+            { bank_name: "AMPBL", account_name: "yoong lee" },
+            { bank_name: "NAB", account_name: "TAICHENG ZHANG" },
+          ] });
+        }
+        if (options.method === "POST") {
+          const body = JSON.parse(options.body);
+          return json({ row: {
+            id: 9,
+            transfer_date: body.date,
+            created_on: body.date,
+            from_bank_name: body.from_bank_name,
+            from_account_name: body.from_account_name,
+            to_bank_name: body.to_bank_name,
+            to_account_name: body.to_account_name,
+            amount: Number(body.amount).toFixed(2),
+            remarks: body.remarks,
+            transfer_time: "22:50:12",
+            username: "hazhan",
+          } });
+        }
+        return json({ rows: [{
+          id: 6, transfer_date: "2026-10-15", created_on: "2026-10-15",
+          from_bank_name: "AMPBL", from_account_name: "yoong lee",
+          to_bank_name: "NAB", to_account_name: "TAICHENG ZHANG",
+          amount: "500.00", remarks: "Test", transfer_time: "22:40:04", username: "hazhan",
+        }] });
+      };
+    </script>
+    <div id="root"></div>
+    <script type="module" src="/src/remarks-preview.jsx"></script>
+  </body>
+</html>

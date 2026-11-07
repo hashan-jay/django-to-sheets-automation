@@ -1,0 +1,26 @@
+{
+  "name": "kaboom-automation",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "predev": "node ./scripts/use-wasm-rollup.mjs",
+    "dev": "vite --host",
+    "prebuild": "node ./scripts/use-wasm-rollup.mjs",
+    "build": "vite build",
+    "prepreview": "node ./scripts/use-wasm-rollup.mjs",
+    "preview": "vite preview --host"
+  },
+  "dependencies": {
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@rollup/wasm-node": "^4.44.0",
+    "@vitejs/plugin-react": "^4.5.2",
+    "vite": "^6.3.5"
+  },
+  "overrides": {
+    "rollup": "npm:@rollup/wasm-node@^4.44.0"
+  }
+}
