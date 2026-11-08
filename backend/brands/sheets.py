@@ -66,8 +66,12 @@ def save_sheet_url(raw: str) -> GoogleSheetSetting:
     sheet_id = normalize_google_sheet_id(text)
     if text and not sheet_id:
         raise ValueError("Paste a Google Sheets link, or clear the field to stop writing.")
+    gid = worksheet_gid(text)
+    clean = google_sheet_url(sheet_id)
+    if clean and gid is not None:
+        clean = f"{clean}/edit?gid={gid}"
     row = sheet_setting()
-    row.sheet_url = text
+    row.sheet_url = clean
     row.last_error = ""
     row.save(update_fields=["sheet_url", "last_error", "updated_at"])
     return row
@@ -231,8 +235,14 @@ def _tab_name(item: Transaction) -> str:
 
 
 def _when(item: Transaction) -> str:
-    aware = _sydney(item)
-    return aware.strftime("%d/%m/%Y %H:%M") if aware else ""
+    from brands.models import SYDNEY
+    from django.utils import timezone as dj_tz
+
+    moment = item.created_at or item.processed_at
+    if moment is None:
+        return item.txn_date.strftime("%d/%m/%Y") if item.txn_date else ""
+    aware = moment.astimezone(SYDNEY) if dj_tz.is_aware(moment) else moment.replace(tzinfo=SYDNEY)
+    return aware.strftime("%d/%m/%Y %H:%M")
 
 
 def _cashbook_cells(item: Transaction) -> list[str]:

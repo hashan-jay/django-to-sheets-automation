@@ -69,7 +69,10 @@ export function today() {
 
 export default function Dashboard() {
   const [brands, setBrands] = useState([]);
-  const [group, setGroup] = useState("All");
+  const [group] = useState("All");
+  const [sheetUrl, setSheetUrl] = useState("");
+  const [sheetNote, setSheetNote] = useState("");
+  const [sheetBusy, setSheetBusy] = useState(false);
   const [brand, setBrand] = useState("All");
   const [date, setDate] = useState(today);
   const [type, setType] = useState("All types");
@@ -90,7 +93,30 @@ export default function Dashboard() {
     api("/api/brands/")
       .then(setBrands)
       .catch((err) => setError(err.message));
+    api("/api/google-sheet/")
+      .then((sheet) => {
+        setSheetUrl(sheet.sheet_url || "");
+        setSheetNote(sheet.last_error || "");
+      })
+      .catch(() => {});
   }, []);
+
+  async function saveSheet(event) {
+    event.preventDefault();
+    setSheetBusy(true);
+    setSheetNote("");
+    try {
+      const saved = await api("/api/google-sheet/", { method: "POST", body: { sheet_url: sheetUrl.trim() } });
+      setSheetUrl(saved.sheet_url || "");
+      if (saved.last_error) setSheetNote(saved.last_error);
+      else if (saved.written_now) setSheetNote(`Wrote ${saved.written_now} rows.`);
+      else setSheetNote("Saved. Completed deposits and withdrawals for each date go on that day's numbered tab.");
+    } catch (err) {
+      setSheetNote(err.message);
+    } finally {
+      setSheetBusy(false);
+    }
+  }
 
   useEffect(() => {
     let stopped = false;
@@ -193,13 +219,6 @@ export default function Dashboard() {
   const windowRange = useVisibleRows(tableScroll, rows.length, ROW_HEIGHT);
   const visibleRows = rows.slice(windowRange.start, windowRange.end);
 
-  function chooseGroup(next) {
-    setGroup(next);
-    if (next !== "All" && brand !== "All" && !brands.some((item) => item.name === brand && item.group === next)) {
-      setBrand("All");
-    }
-  }
-
   const viewStatus = friendlyStatus(live, refreshing, data);
   const dayCount = Number(bucket(stats, "row_count").count) || 0;
   const completedIn = bucket(stats, "completed_deposit");
@@ -211,29 +230,22 @@ export default function Dashboard() {
     <section className="command" aria-label="Filters">
     <div className="command-head">
       <div>
-        <h2>What to show</h2>
-        <p>Choose a group first. Brand, date, and live updates apply to bank balances and transactions together.</p>
+        <h2>KABOOM77</h2>
+        <p>Date and live updates apply to bank balances and transactions together. Completed deposits and withdrawals are written to the day tab in this Google Sheet.</p>
       </div>
-      <p className="command-scope">{scopeLabel(group, brand)} · {formatDay(date)}</p>
+      <p className="command-scope">{formatDay(date)}</p>
     </div>
-    <div className="group-filter" role="group" aria-label="Group">
-      {GROUPS.map(([value, label]) => {
-        const count = value === "All" ? brands.length : brands.filter((item) => item.group === value).length;
-        if (value !== "All" && count === 0) return null;
-        return (
-          <button
-            key={value}
-            type="button"
-            className={group === value ? "selected" : ""}
-            aria-pressed={group === value}
-            onClick={() => chooseGroup(value)}
-          >
-            <span className="group-name">{label}</span>
-            <span className="group-meta">{brands.length ? `${count} brand${count === 1 ? "" : "s"}` : "Loading brands"}</span>
-          </button>
-        );
-      })}
-    </div>
+    <form className="sheet-url" onSubmit={saveSheet}>
+      <label htmlFor="sheet-url">Writing Google Sheet</label>
+      <input
+        id="sheet-url"
+        value={sheetUrl}
+        placeholder="https://docs.google.com/spreadsheets/d/..."
+        onChange={(event) => setSheetUrl(event.target.value)}
+      />
+      <button type="submit" disabled={sheetBusy}>{sheetBusy ? "Saving…" : "Save"}</button>
+      {sheetNote && <p className={sheetNote.startsWith("Saved") || sheetNote.startsWith("Wrote") ? "sheet-url-note" : "sheet-url-note is-error"}>{sheetNote}</p>}
+    </form>
     <div className="page-controls">
       <label>
         Brand
@@ -742,14 +754,6 @@ function TransactionDialog({ request, onClose }) {
     </div>
   );
 }
-
-const GROUPS = [
-  ["All", "All groups"],
-  ["SOLO - KABOOM", "SOLO - KABOOM"],
-  ["GROUP AK", "GROUP AK"],
-  ["GROUP U", "GROUP U"],
-  ["GROUP Y", "GROUP Y"],
-];
 
 const BANK_STATUS_FILTERS = [
   ["All", "All"],
