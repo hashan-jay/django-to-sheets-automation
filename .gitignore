@@ -1,3 +1,4 @@
+secrets/
 backend/.venv/
 backend/.env
 frontend/node_modules/
