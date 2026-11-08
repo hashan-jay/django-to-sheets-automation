@@ -103,21 +103,22 @@ def _export_pending(limit: int) -> int:
         Transaction.objects.filter(status="COMPLETED", type__in=["DEPOSIT", "WITHDRAW"])
         .exclude(sheet_export__isnull=False)
         .select_related("brand")
-        .order_by("created_at", "id")[:limit]
+        .order_by("txn_date", "created_at", "id")[:limit]
     )
     if not pending:
         return 0
     try:
         spreadsheet = _open_spreadsheet(sheet_id)
-        written = _write_cashbook(spreadsheet, pending)
+        written, errors = _write_cashbook(spreadsheet, pending)
     except Exception as exc:
         message = str(exc).splitlines()[0][:500]
         log.warning("Google Sheet write failed: %s", message)
         GoogleSheetSetting.objects.filter(pk=row.pk).update(last_error=message)
         return 0
-    if not written:
-        return 0
-    GoogleSheetSetting.objects.filter(pk=row.pk).update(last_error="", last_written_at=timezone.now())
+    GoogleSheetSetting.objects.filter(pk=row.pk).update(
+        last_error=" ".join(errors)[:500],
+        last_written_at=timezone.now() if written else row.last_written_at,
+    )
     return len(written)
 
 
@@ -130,69 +131,103 @@ def _open_spreadsheet(sheet_id: str):
     return client.open_by_key(sheet_id)
 
 
-def _write_cashbook(spreadsheet, pending: list[Transaction]) -> list[Transaction]:
-    """Finance cashbook: date tab, deposits from row 105, withdrawals from row 1024.
+def _write_cashbook(spreadsheet, pending: list[Transaction]) -> tuple[list[Transaction], list[str]]:
+    """Finance cashbook: tab name is the transaction date's day number.
 
-    Column A is the locked day number. Writes start at column C (Bank) through L.
+    9 November is tab "9". Deposits fill empty rows from 105. Withdrawals fill
+    empty rows from 1024. Column A and any row that already has an ID are not touched.
     """
     tabs = {str(worksheet.title).strip(): worksheet for worksheet in spreadsheet.worksheets()}
     grouped: dict[str, list[Transaction]] = {}
     for item in pending:
         grouped.setdefault(_tab_name(item), []).append(item)
     written: list[Transaction] = []
+    errors: list[str] = []
     for title, items in grouped.items():
         worksheet = tabs.get(title)
         if worksheet is None:
-            raise LookupError(f"This spreadsheet has no tab named {title}.")
-        ids = worksheet.col_values(7)
-        deposits = [item for item in items if item.type != "WITHDRAW"]
-        withdraws = [item for item in items if item.type == "WITHDRAW"]
-        written.extend(_write_block(worksheet, ids, deposits, DEPOSIT_START, DEPOSIT_END, False))
-        written.extend(_write_block(worksheet, ids, withdraws, WITHDRAW_START, worksheet.row_count, True))
-    if written:
-        SheetExport.objects.bulk_create([SheetExport(transaction=item) for item in written])
-    return written
+            errors.append(f"No tab named {title}.")
+            continue
+        try:
+            ids = worksheet.col_values(7)
+            existing = {str(value).strip() for value in ids if str(value).strip()}
+            already = [item for item in items if item.external_id in existing]
+            fresh = [item for item in items if item.external_id not in existing]
+            _remember(already)
+            deposits = [item for item in fresh if item.type != "WITHDRAW"]
+            withdraws = [item for item in fresh if item.type == "WITHDRAW"]
+            placed = _write_block(worksheet, ids, deposits, DEPOSIT_START, DEPOSIT_END)
+            placed += _write_block(worksheet, ids, withdraws, WITHDRAW_START, worksheet.row_count)
+            _remember(placed)
+            written.extend(already)
+            written.extend(placed)
+            left = len(fresh) - len(placed)
+            if left:
+                errors.append(f"Tab {title} ran out of empty rows for {left} transaction(s).")
+        except Exception as exc:
+            errors.append(f"Tab {title}: {str(exc).splitlines()[0][:180]}")
+            log.warning("Google Sheet tab %s failed: %s", title, exc)
+    return written, errors
 
 
-def _write_block(worksheet, id_column: list[str], items: list[Transaction], start: int, end: int, withdraw: bool):
+def _remember(items: list[Transaction]) -> None:
+    if items:
+        SheetExport.objects.bulk_create(
+            [SheetExport(transaction=item) for item in items],
+            ignore_conflicts=True,
+        )
+
+
+def _write_block(worksheet, id_column: list[str], items: list[Transaction], start: int, end: int):
     if not items:
         return []
-    slot = _next_empty(id_column, start, end)
-    if slot is None:
-        kind = "withdrawal" if withdraw else "deposit"
-        raise LookupError(f"No empty {kind} rows left on tab {worksheet.title}.")
-    batch = items[: end - slot + 1]
-    values = [_cashbook_cells(item) for item in batch]
-    last = slot + len(batch) - 1
-    worksheet.update(range_name=f"B{slot}:J{last}", values=values, value_input_option="USER_ENTERED")
+    slots = _empty_slots(id_column, start, end, len(items))
+    if not slots:
+        return []
+    batch = items[: len(slots)]
+    ranges = []
+    run_start = slots[0]
+    run_values = [_cashbook_cells(batch[0])]
+    for index in range(1, len(slots)):
+        if slots[index] == slots[index - 1] + 1:
+            run_values.append(_cashbook_cells(batch[index]))
+            continue
+        ranges.append((run_start, run_values))
+        run_start = slots[index]
+        run_values = [_cashbook_cells(batch[index])]
+    ranges.append((run_start, run_values))
+    worksheet.batch_update(
+        [
+            {"range": f"B{start_row}:J{start_row + len(values) - 1}", "values": values}
+            for start_row, values in ranges
+        ],
+        value_input_option="USER_ENTERED",
+    )
+    for slot, item in zip(slots, batch):
+        while len(id_column) < slot:
+            id_column.append("")
+        id_column[slot - 1] = item.external_id
     return batch
 
 
-def _next_empty(id_column: list[str], start: int, end: int) -> int | None:
+def _empty_slots(id_column: list[str], start: int, end: int, count: int) -> list[int]:
+    slots: list[int] = []
     for number in range(start, end + 1):
         current = id_column[number - 1] if number - 1 < len(id_column) else ""
         if not str(current).strip():
-            return number
-    return None
-
-
-def _sydney(item: Transaction):
-    from brands.models import SYDNEY
-    from django.utils import timezone as dj_tz
-
-    moment = item.created_at or item.processed_at
-    if moment is None:
-        return None
-    return moment.astimezone(SYDNEY) if dj_tz.is_aware(moment) else moment.replace(tzinfo=SYDNEY)
+            slots.append(number)
+            if len(slots) == count:
+                break
+    return slots
 
 
 def _tab_name(item: Transaction) -> str:
-    aware = _sydney(item)
-    if aware is None:
-        from brands.models import sydney_today
+    """Day-of-month tab. 9 November 2026 is the sheet titled 9."""
+    if item.txn_date is not None:
+        return str(item.txn_date.day)
+    from brands.models import sydney_today
 
-        return str(sydney_today().day)
-    return str(aware.day)
+    return str(sydney_today().day)
 
 
 def _when(item: Transaction) -> str:
