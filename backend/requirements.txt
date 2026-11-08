@@ -4,4 +4,6 @@ django-cors-headers>=4.6
 psycopg[binary]>=3.2
 python-dotenv>=1.0
 requests>=2.32
+gspread>=6.1
+google-auth>=2.35
 redis>=5.2

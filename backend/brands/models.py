@@ -233,6 +233,25 @@ class BankTransfer(models.Model):
         return f"{self.transfer_date} {self.from_bank_name} → {self.to_bank_name} {self.amount}"
 
 
+class GoogleSheetSetting(models.Model):
+    """The spreadsheet URL entered in the web app. One row for the whole system."""
+
+    sheet_url = models.URLField(max_length=500, blank=True)
+    last_error = models.TextField(blank=True)
+    last_written_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self) -> str:
+        return self.sheet_url or "No sheet"
+
+
+class SheetExport(models.Model):
+    """A completed deposit or withdrawal already appended to the sheet."""
+
+    transaction = models.OneToOneField(Transaction, on_delete=models.CASCADE, related_name="sheet_export")
+    written_at = models.DateTimeField(auto_now_add=True)
+
+
 def sydney_today():
     return datetime.now(SYDNEY).date()
 

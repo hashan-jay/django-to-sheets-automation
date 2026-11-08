@@ -10,6 +10,7 @@ from brands import livecache
 from brands.models import SYDNEY, Brand, sydney_today
 from brands.poller import note_watch, start_poller
 from brands.customers import customer_board, start_customer_sync
+from brands.sheets import export_pending, public_status, save_sheet_url
 from brands.services import (
     bank_accounts,
     bank_ledger,
@@ -22,6 +23,23 @@ from brands.services import (
     transaction_record,
     update_bank_ledger,
 )
+
+
+class GoogleSheetView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return Response(public_status())
+
+    def post(self, request):
+        try:
+            save_sheet_url(str(request.data.get("sheet_url") or ""))
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=400)
+        written = export_pending()
+        body = public_status()
+        body["written_now"] = written
+        return Response(body)
 
 
 class BrandListView(APIView):

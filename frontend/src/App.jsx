@@ -10,6 +10,9 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [ready, setReady] = useState(false);
   const [page, setPage] = useState("dashboard");
+  const [sheetUrl, setSheetUrl] = useState("");
+  const [sheetNote, setSheetNote] = useState("");
+  const [sheetBusy, setSheetBusy] = useState(false);
   const [confirmLogout, setConfirmLogout] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
 
@@ -19,10 +22,33 @@ export default function App() {
       return;
     }
     api("/api/auth/me/")
-      .then(setUser)
+      .then((me) => {
+        setUser(me);
+        return api("/api/google-sheet/").then((sheet) => {
+          setSheetUrl(sheet.sheet_url || "");
+          setSheetNote(sheet.last_error || "");
+        });
+      })
       .catch(() => setToken(""))
       .finally(() => setReady(true));
   }, []);
+
+  async function saveSheet(event) {
+    event.preventDefault();
+    setSheetBusy(true);
+    setSheetNote("");
+    try {
+      const saved = await api("/api/google-sheet/", { method: "POST", body: { sheet_url: sheetUrl.trim() } });
+      setSheetUrl(saved.sheet_url || "");
+      if (saved.last_error) setSheetNote(saved.last_error);
+      else if (saved.written_now) setSheetNote(`Wrote ${saved.written_now} rows.`);
+      else setSheetNote("Saved. New completed deposits and withdrawals will be added to this sheet.");
+    } catch (error) {
+      setSheetNote(error.message);
+    } finally {
+      setSheetBusy(false);
+    }
+  }
 
   async function logout() {
     setLoggingOut(true);
@@ -53,6 +79,17 @@ export default function App() {
             <p>Live deposits and withdrawals from the KABOOM77 brand API.</p>
           </button>
         </div>
+        <form className="sheet-url" onSubmit={saveSheet}>
+          <label htmlFor="sheet-url">Writing Google Sheet</label>
+          <input
+            id="sheet-url"
+            value={sheetUrl}
+            placeholder="https://docs.google.com/spreadsheets/d/..."
+            onChange={(event) => setSheetUrl(event.target.value)}
+          />
+          <button type="submit" disabled={sheetBusy}>{sheetBusy ? "Saving…" : "Save"}</button>
+          {sheetNote && <span className="sheet-url-note">{sheetNote}</span>}
+        </form>
         <div className="top-actions">
           <button
             type="button"

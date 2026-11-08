@@ -9,6 +9,7 @@ from brands.views import (
     BrandListView,
     CustomersView,
     DashboardView,
+    GoogleSheetView,
     SyncView,
     TransactionDetailView,
 )
@@ -24,4 +25,5 @@ urlpatterns = [
     path("bank-transfers/accounts/", BankTransferAccountView.as_view()),
     path("transactions/detail/", TransactionDetailView.as_view()),
     path("sync/", SyncView.as_view()),
+    path("google-sheet/", GoogleSheetView.as_view()),
 ]

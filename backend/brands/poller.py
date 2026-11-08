@@ -11,12 +11,14 @@ from django.conf import settings
 from brands import livecache
 from brands.models import sydney_today
 from brands.services import sync_day
+from brands.sheets import export_pending
 
 log = logging.getLogger("django")
 
 _started = False
 _guard = threading.Lock()
 _watched: dict[date, float] = {}
+_last_sheet_export = 0.0
 
 
 def note_watch(day: date) -> None:
@@ -47,6 +49,7 @@ def start_poller() -> None:
 
 
 def _loop() -> None:
+    global _last_sheet_export
     interval = max(1, int(getattr(settings, "BRANDS_POLL_SECONDS", 2)))
     while True:
         for day in sorted(active_dates()):
@@ -55,4 +58,10 @@ def _loop() -> None:
             except Exception:
                 # The next pass retries. BrandSync stores API errors separately.
                 pass
+        if time.monotonic() - _last_sheet_export >= 15:
+            _last_sheet_export = time.monotonic()
+            try:
+                export_pending()
+            except Exception:
+                log.exception("Google Sheet export failed")
         time.sleep(interval)
