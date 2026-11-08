@@ -245,20 +245,23 @@ def _when(item: Transaction) -> str:
     return aware.strftime("%d/%m/%Y %H:%M")
 
 
+def _sheet_bank(item: Transaction) -> str:
+    """Google Sheet Bank is the web app bank name and bank account name together."""
+    bank = (item.bank_name or "").strip()
+    account = (item.bank_account_name or "").strip()
+    return " ".join(part for part in (bank, account) if part)
+
+
 def _cashbook_cells(item: Transaction) -> list[str]:
-    """B Date through L Staff. Day stays in the locked column A."""
+    """B Date through J Player. Column A, Rate, and Staff are never written."""
     amount = f"{item.amount:.2f}"
+    status = "Withdraw" if item.type == "WITHDRAW" else "Deposit"
     if item.type == "WITHDRAW":
         amount = f"-{amount}"
-        bank = ""
-        status = "Withdraw"
-    else:
-        bank = item.bank_name or item.bank
-        status = "Deposit"
     return [
         _when(item),
-        bank,
-        item.bank_account_name or item.acc_name or item.player_name,
+        _sheet_bank(item),
+        (item.player_name or "").strip(),
         amount,
         status,
         item.external_id,
@@ -266,6 +269,47 @@ def _cashbook_cells(item: Transaction) -> list[str]:
         "",
         item.username,
     ]
+
+
+def repair_written_columns() -> int:
+    """Correct Bank and Description on rows this app already wrote. Staff is not touched."""
+    row = sheet_setting()
+    sheet_id = normalize_google_sheet_id(row.sheet_url)
+    if not sheet_id:
+        return 0
+    exported = list(
+        SheetExport.objects.select_related("transaction", "transaction__brand").order_by("transaction__txn_date", "id")
+    )
+    if not exported:
+        return 0
+    spreadsheet = _open_spreadsheet(sheet_id)
+    tabs = {str(worksheet.title).strip(): worksheet for worksheet in spreadsheet.worksheets()}
+    grouped: dict[str, list[Transaction]] = {}
+    for mark in exported:
+        grouped.setdefault(_tab_name(mark.transaction), []).append(mark.transaction)
+    updated = 0
+    for title, items in grouped.items():
+        worksheet = tabs.get(title)
+        if worksheet is None:
+            continue
+        ids = worksheet.col_values(7)
+        positions = {}
+        for index, value in enumerate(ids, start=1):
+            key = str(value).strip()
+            if key and key not in positions:
+                positions[key] = index
+        ranges = []
+        for item in items:
+            slot = positions.get(item.external_id)
+            if slot is None:
+                continue
+            ranges.append({"range": f"C{slot}:D{slot}", "values": [[_sheet_bank(item), (item.player_name or "").strip()]]})
+        for offset in range(0, len(ranges), 200):
+            chunk = ranges[offset : offset + 200]
+            if chunk:
+                worksheet.batch_update(chunk, value_input_option="USER_ENTERED")
+                updated += len(chunk)
+    return updated
 
 
 def clear_exports_for_tests() -> None:
