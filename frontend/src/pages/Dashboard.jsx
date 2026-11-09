@@ -243,6 +243,13 @@ export default function Dashboard() {
   const windowRange = useVisibleRows(tableScroll, rows.length, ROW_HEIGHT);
   const visibleRows = rows.slice(windowRange.start, windowRange.end);
 
+  const depositNumber = Number(depositStart);
+  const withdrawNumber = Number(withdrawStart);
+  const startRowsValid = Number.isInteger(depositNumber)
+    && Number.isInteger(withdrawNumber)
+    && depositNumber >= 2
+    && withdrawNumber <= 1000000
+    && depositNumber < withdrawNumber;
   const viewStatus = friendlyStatus(live, refreshing, data);
   const dayCount = Number(bucket(stats, "row_count").count) || 0;
   const completedIn = bucket(stats, "completed_deposit");
@@ -255,48 +262,65 @@ export default function Dashboard() {
     <div className="command-head">
       <div>
         <h2>KABOOM77</h2>
-        <p>Date and live updates apply to bank balances and transactions together. Completed deposits and withdrawals are written to the day tab in this Google Sheet.</p>
+        <p>Balances and transactions follow the date you pick. Completed rows are written to that day’s sheet tab.</p>
       </div>
       <p className="command-scope">{formatDay(date)}</p>
     </div>
-    <form className="sheet-url" onSubmit={saveSheet}>
-      <label htmlFor="sheet-url">Writing Google Sheet</label>
-      <div className="sheet-url-row">
-        <input
-          id="sheet-url"
-          type="url"
-          inputMode="url"
-          spellCheck={false}
-          autoComplete="off"
-          value={sheetUrl}
-          placeholder="Paste the Google Sheet link"
-          onChange={(event) => setSheetUrl(event.target.value)}
-        />
-        <button type="submit" disabled={sheetBusy}>{sheetBusy ? "Saving…" : "Save"}</button>
-      </div>
-      <p className={sheetNote ? (sheetNote.startsWith("Saved") || sheetNote.startsWith("Wrote") ? "sheet-url-note" : "sheet-url-note is-error") : "sheet-url-note"}>
-        {sheetNote || "Each date is written on the tab with that day’s number. Staff cells are left as you typed them."}
-      </p>
-    </form>
-    <form className="sheet-starts" onSubmit={saveStartRows}>
-      <label>
-        Deposit start row
-        <input
-          inputMode="numeric"
-          value={depositStart}
-          onChange={(event) => setDepositStart(event.target.value)}
-        />
-      </label>
-      <label>
-        Withdraw start row
-        <input
-          inputMode="numeric"
-          value={withdrawStart}
-          onChange={(event) => setWithdrawStart(event.target.value)}
-        />
-      </label>
-      <button type="submit" disabled={rowsBusy}>{rowsBusy ? "Saving…" : "Save rows"}</button>
-    </form>
+    <div className="writer">
+      <form className="sheet-url" onSubmit={saveSheet}>
+        <div className="writer-label">
+          <label htmlFor="sheet-url">Google Sheet</label>
+          <span>Day tab · Staff stays untouched</span>
+        </div>
+        <div className="sheet-url-row">
+          <input
+            id="sheet-url"
+            type="url"
+            inputMode="url"
+            spellCheck={false}
+            autoComplete="off"
+            value={sheetUrl}
+            placeholder="Paste the Google Sheet link"
+            onChange={(event) => setSheetUrl(event.target.value)}
+          />
+          {sheetUrl.trim() && (
+            <a className="sheet-open" href={sheetUrl.trim()} target="_blank" rel="noreferrer">Open</a>
+          )}
+          <button type="submit" disabled={sheetBusy || !sheetUrl.trim()}>{sheetBusy ? "Saving…" : "Save"}</button>
+        </div>
+      </form>
+      <form className="sheet-starts" onSubmit={saveStartRows}>
+        <label className={startRowsValid ? "" : "is-invalid"}>
+          Deposits from
+          <input
+            inputMode="numeric"
+            aria-label="Deposit start row"
+            value={depositStart}
+            onChange={(event) => setDepositStart(event.target.value.replace(/[^\d]/g, ""))}
+          />
+        </label>
+        <label className={startRowsValid ? "" : "is-invalid"}>
+          Withdrawals from
+          <input
+            inputMode="numeric"
+            aria-label="Withdraw start row"
+            value={withdrawStart}
+            onChange={(event) => setWithdrawStart(event.target.value.replace(/[^\d]/g, ""))}
+          />
+        </label>
+        <button type="submit" disabled={rowsBusy || !startRowsValid}>{rowsBusy ? "Saving…" : "Save rows"}</button>
+        <p className="sheet-start-hint">
+          {startRowsValid
+            ? `Deposits use empty rows ${depositNumber}–${withdrawNumber - 1}. Withdrawals start at ${withdrawNumber}.`
+            : "Enter whole numbers from 2 to 1000000. Deposits must start above withdrawals."}
+        </p>
+      </form>
+      {sheetNote && (
+        <p className={sheetNote.startsWith("Saved") || sheetNote.startsWith("Wrote") ? "sheet-url-note is-ok" : "sheet-url-note is-error"} role="status">
+          {sheetNote}
+        </p>
+      )}
+    </div>
     <div className="page-controls">
       <label>
         Brand
