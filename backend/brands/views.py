@@ -10,7 +10,7 @@ from brands import livecache
 from brands.models import SYDNEY, Brand, sydney_today
 from brands.poller import note_watch, start_poller
 from brands.customers import customer_board, start_customer_sync
-from brands.sheets import export_pending, public_status, save_sheet_url
+from brands.sheets import export_pending, public_status, save_sheet_url, save_start_rows
 from brands.services import (
     bank_accounts,
     bank_ledger,
@@ -33,7 +33,10 @@ class GoogleSheetView(APIView):
 
     def post(self, request):
         try:
-            save_sheet_url(str(request.data.get("sheet_url") or ""))
+            if "deposit_start_row" in request.data or "withdraw_start_row" in request.data:
+                save_start_rows(request.data.get("deposit_start_row"), request.data.get("withdraw_start_row"))
+            else:
+                save_sheet_url(str(request.data.get("sheet_url") or ""))
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=400)
         written = export_pending()

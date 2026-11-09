@@ -237,6 +237,8 @@ class GoogleSheetSetting(models.Model):
     """The spreadsheet URL entered in the web app. One row for the whole system."""
 
     sheet_url = models.URLField(max_length=500, blank=True)
+    deposit_start_row = models.PositiveIntegerField(default=105)
+    withdraw_start_row = models.PositiveIntegerField(default=1024)
     last_error = models.TextField(blank=True)
     last_written_at = models.DateTimeField(null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)

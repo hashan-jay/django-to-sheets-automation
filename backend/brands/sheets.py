@@ -26,9 +26,10 @@ CREDENTIALS = Path(settings.BASE_DIR).parent / "secrets" / "google-sheets.json"
 DEFAULT_SHEET_URL = (
     "https://docs.google.com/spreadsheets/d/1AsiDeo0e08NEehnnsJZGd29dVXLIMlQ-KaUF_-mW-zY/edit?gid=2040112683"
 )
-DEPOSIT_START = 105
-WITHDRAW_START = 1024
-DEPOSIT_END = WITHDRAW_START - 1
+DEFAULT_DEPOSIT_START = 105
+DEFAULT_WITHDRAW_START = 1024
+MIN_SHEET_START_ROW = 2
+MAX_SHEET_START_ROW = 1_000_000
 
 
 def normalize_google_sheet_id(raw: object) -> str:
@@ -77,10 +78,35 @@ def save_sheet_url(raw: str) -> GoogleSheetSetting:
     return row
 
 
+def save_start_rows(deposit_raw, withdraw_raw) -> GoogleSheetSetting:
+    """Same bounds as finance-automation: deposits must start before withdrawals."""
+    try:
+        deposit = int(str(deposit_raw).strip())
+        withdraw = int(str(withdraw_raw).strip())
+    except (TypeError, ValueError):
+        raise ValueError("Enter a whole number for the deposit and withdraw start rows.")
+    if deposit < MIN_SHEET_START_ROW or deposit > MAX_SHEET_START_ROW:
+        raise ValueError("Enter a deposit start row between 2 and 1000000.")
+    if withdraw < MIN_SHEET_START_ROW or withdraw > MAX_SHEET_START_ROW:
+        raise ValueError("Enter a withdraw start row between 2 and 1000000.")
+    if deposit >= withdraw:
+        raise ValueError(
+            f"Deposits must start before withdrawals. Deposit row is {deposit} and withdraw row is {withdraw}."
+        )
+    row = sheet_setting()
+    row.deposit_start_row = deposit
+    row.withdraw_start_row = withdraw
+    row.last_error = ""
+    row.save(update_fields=["deposit_start_row", "withdraw_start_row", "last_error", "updated_at"])
+    return row
+
+
 def public_status() -> dict:
     row = sheet_setting()
     return {
         "sheet_url": row.sheet_url,
+        "deposit_start_row": row.deposit_start_row or DEFAULT_DEPOSIT_START,
+        "withdraw_start_row": row.withdraw_start_row or DEFAULT_WITHDRAW_START,
         "sheet_id": normalize_google_sheet_id(row.sheet_url),
         "last_error": row.last_error,
         "last_written_at": row.last_written_at.isoformat() if row.last_written_at else "",
@@ -113,7 +139,12 @@ def _export_pending(limit: int) -> int:
         return 0
     try:
         spreadsheet = _open_spreadsheet(sheet_id)
-        written, errors = _write_cashbook(spreadsheet, pending)
+        written, errors = _write_cashbook(
+            spreadsheet,
+            pending,
+            row.deposit_start_row or DEFAULT_DEPOSIT_START,
+            row.withdraw_start_row or DEFAULT_WITHDRAW_START,
+        )
     except Exception as exc:
         message = str(exc).splitlines()[0][:500]
         log.warning("Google Sheet write failed: %s", message)
@@ -135,12 +166,21 @@ def _open_spreadsheet(sheet_id: str):
     return client.open_by_key(sheet_id)
 
 
-def _write_cashbook(spreadsheet, pending: list[Transaction]) -> tuple[list[Transaction], list[str]]:
+def _write_cashbook(
+    spreadsheet,
+    pending: list[Transaction],
+    deposit_start: int = DEFAULT_DEPOSIT_START,
+    withdraw_start: int = DEFAULT_WITHDRAW_START,
+) -> tuple[list[Transaction], list[str]]:
     """Finance cashbook: tab name is the transaction date's day number.
 
-    9 November is tab "9". Deposits fill empty rows from 105. Withdrawals fill
-    empty rows from 1024. Column A and any row that already has an ID are not touched.
+    Deposits fill empty rows from deposit_start and stop before withdraw_start.
+    Withdrawals fill empty rows from withdraw_start downward. Column A and any
+    row that already has an ID are not touched.
     """
+    deposit_start = int(deposit_start)
+    withdraw_start = int(withdraw_start)
+    deposit_end = withdraw_start - 1
     tabs = {str(worksheet.title).strip(): worksheet for worksheet in spreadsheet.worksheets()}
     grouped: dict[str, list[Transaction]] = {}
     for item in pending:
@@ -160,8 +200,9 @@ def _write_cashbook(spreadsheet, pending: list[Transaction]) -> tuple[list[Trans
             _remember(already)
             deposits = [item for item in fresh if item.type != "WITHDRAW"]
             withdraws = [item for item in fresh if item.type == "WITHDRAW"]
-            placed = _write_block(worksheet, ids, deposits, DEPOSIT_START, DEPOSIT_END)
-            placed += _write_block(worksheet, ids, withdraws, WITHDRAW_START, worksheet.row_count)
+            placed = _write_block(worksheet, ids, deposits, deposit_start, deposit_end)
+            withdraw_end = max(worksheet.row_count, withdraw_start + 400)
+            placed += _write_block(worksheet, ids, withdraws, withdraw_start, withdraw_end)
             _remember(placed)
             written.extend(already)
             written.extend(placed)

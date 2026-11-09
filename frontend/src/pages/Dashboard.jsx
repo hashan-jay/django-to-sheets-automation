@@ -71,8 +71,11 @@ export default function Dashboard() {
   const [brands, setBrands] = useState([]);
   const [group] = useState("All");
   const [sheetUrl, setSheetUrl] = useState("");
+  const [depositStart, setDepositStart] = useState("105");
+  const [withdrawStart, setWithdrawStart] = useState("1024");
   const [sheetNote, setSheetNote] = useState("");
   const [sheetBusy, setSheetBusy] = useState(false);
+  const [rowsBusy, setRowsBusy] = useState(false);
   const [brand, setBrand] = useState("All");
   const [date, setDate] = useState(today);
   const [type, setType] = useState("All types");
@@ -96,10 +99,31 @@ export default function Dashboard() {
     api("/api/google-sheet/")
       .then((sheet) => {
         setSheetUrl(sheet.sheet_url || "");
+        setDepositStart(String(sheet.deposit_start_row || 105));
+        setWithdrawStart(String(sheet.withdraw_start_row || 1024));
         setSheetNote(sheet.last_error || "");
       })
       .catch(() => {});
   }, []);
+
+  async function saveStartRows(event) {
+    event.preventDefault();
+    setRowsBusy(true);
+    setSheetNote("");
+    try {
+      const saved = await api("/api/google-sheet/", {
+        method: "POST",
+        body: { deposit_start_row: depositStart.trim(), withdraw_start_row: withdrawStart.trim() },
+      });
+      setDepositStart(String(saved.deposit_start_row));
+      setWithdrawStart(String(saved.withdraw_start_row));
+      setSheetNote(`Saved. Deposits start at row ${saved.deposit_start_row}. Withdrawals start at row ${saved.withdraw_start_row}.`);
+    } catch (err) {
+      setSheetNote(err.message);
+    } finally {
+      setRowsBusy(false);
+    }
+  }
 
   async function saveSheet(event) {
     event.preventDefault();
@@ -253,6 +277,25 @@ export default function Dashboard() {
       <p className={sheetNote ? (sheetNote.startsWith("Saved") || sheetNote.startsWith("Wrote") ? "sheet-url-note" : "sheet-url-note is-error") : "sheet-url-note"}>
         {sheetNote || "Each date is written on the tab with that day’s number. Staff cells are left as you typed them."}
       </p>
+    </form>
+    <form className="sheet-starts" onSubmit={saveStartRows}>
+      <label>
+        Deposit start row
+        <input
+          inputMode="numeric"
+          value={depositStart}
+          onChange={(event) => setDepositStart(event.target.value)}
+        />
+      </label>
+      <label>
+        Withdraw start row
+        <input
+          inputMode="numeric"
+          value={withdrawStart}
+          onChange={(event) => setWithdrawStart(event.target.value)}
+        />
+      </label>
+      <button type="submit" disabled={rowsBusy}>{rowsBusy ? "Saving…" : "Save rows"}</button>
     </form>
     <div className="page-controls">
       <label>
