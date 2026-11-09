@@ -295,7 +295,7 @@ def _sheet_bank(item: Transaction) -> str:
 
 def _cashbook_cells(item: Transaction) -> list[str]:
     """B Date through J Player. Column A, Rate, and Staff are never written."""
-    amount = f"{item.amount:.2f}"
+    amount = f"{abs(item.amount):.2f}"
     status = "Withdraw" if item.type == "WITHDRAW" else "Deposit"
     if item.type == "WITHDRAW":
         amount = f"-{amount}"
