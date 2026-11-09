@@ -237,14 +237,22 @@ export default function Dashboard() {
     </div>
     <form className="sheet-url" onSubmit={saveSheet}>
       <label htmlFor="sheet-url">Writing Google Sheet</label>
-      <input
-        id="sheet-url"
-        value={sheetUrl}
-        placeholder="https://docs.google.com/spreadsheets/d/..."
-        onChange={(event) => setSheetUrl(event.target.value)}
-      />
-      <button type="submit" disabled={sheetBusy}>{sheetBusy ? "Saving…" : "Save"}</button>
-      {sheetNote && <p className={sheetNote.startsWith("Saved") || sheetNote.startsWith("Wrote") ? "sheet-url-note" : "sheet-url-note is-error"}>{sheetNote}</p>}
+      <div className="sheet-url-row">
+        <input
+          id="sheet-url"
+          type="url"
+          inputMode="url"
+          spellCheck={false}
+          autoComplete="off"
+          value={sheetUrl}
+          placeholder="Paste the Google Sheet link"
+          onChange={(event) => setSheetUrl(event.target.value)}
+        />
+        <button type="submit" disabled={sheetBusy}>{sheetBusy ? "Saving…" : "Save"}</button>
+      </div>
+      <p className={sheetNote ? (sheetNote.startsWith("Saved") || sheetNote.startsWith("Wrote") ? "sheet-url-note" : "sheet-url-note is-error") : "sheet-url-note"}>
+        {sheetNote || "Each date is written on the tab with that day’s number. Staff cells are left as you typed them."}
+      </p>
     </form>
     <div className="page-controls">
       <label>
