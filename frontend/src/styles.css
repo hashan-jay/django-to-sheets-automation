@@ -1179,7 +1179,7 @@ tr.pending { background: #fffbeb; }
 tr.pending:hover td { background: #fef3c7; }
 tr.pending td:nth-child(18) { color: #a16207; font-weight: 700; }
 tr.rejected td:nth-child(18) { color: #6b7280; font-weight: 700; }
-td.bank-name, td.bank-account { font-weight: 700; color: #0f2744; }
+td.bank-name, td.bank-account, td.payment-method { font-weight: 700; color: #0f2744; }
 
 .empty { color: #5b6b7c; text-align: center; padding: 24px; }
 

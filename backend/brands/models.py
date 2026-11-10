@@ -79,6 +79,7 @@ class Transaction(models.Model):
             "type": self.type,
             "bank_name": self.bank_name if self.status == "COMPLETED" and self.type in {"DEPOSIT", "WITHDRAW"} else "",
             "bank_account_name": self.bank_account_name if self.status == "COMPLETED" and self.type in {"DEPOSIT", "WITHDRAW"} else "",
+            "payment_method": "" if (self.bank_name or self.bank_account_name) else self.method,
             "bank": self.bank,
             "acc_name": self.acc_name,
             "acc_no": self.acc_no,

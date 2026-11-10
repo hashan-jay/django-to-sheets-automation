@@ -11,6 +11,7 @@ const COLUMNS = [
   ["type", "Type"],
   ["bank_name", "Bank Name"],
   ["bank_account_name", "Bank Account Name"],
+  ["payment_method", "Payment Method"],
   ["bank", "Bank"],
   ["acc_name", "Acc Name"],
   ["acc_no", "Acc No"],
@@ -628,7 +629,9 @@ const TransactionRow = memo(function TransactionRow({ row, onOpen }) {
               ? "bank-name"
               : key === "bank_account_name" && row[key]
                 ? "bank-account"
-                : undefined
+                : key === "payment_method" && row[key]
+                  ? "payment-method"
+                  : undefined
           }
         >
           {row[key]}
