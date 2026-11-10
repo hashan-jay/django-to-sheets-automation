@@ -130,31 +130,39 @@ def _sync_brands_for_day(day) -> dict:
     if not sheet_id:
         raise ValueError("Save a Google Sheet link first.")
     pending = list(
-        Transaction.objects.filter(txn_date=day, type__in=["DEPOSIT", "WITHDRAW"], brand__is_active=True)
+        Transaction.objects.filter(
+            txn_date=day,
+            status="COMPLETED",
+            type__in=["DEPOSIT", "WITHDRAW"],
+            brand__is_active=True,
+        )
         .select_related("brand")
         .order_by("created_at", "id")
     )
     spreadsheet = _open_spreadsheet(sheet_id)
+    title = str(day.day)
+    worksheet = next((item for item in spreadsheet.worksheets() if str(item.title).strip() == title), None)
+    removed = _remove_uncompleted(worksheet, day) if worksheet is not None else 0
     written, errors = _write_cashbook(
         spreadsheet,
         pending,
         row.deposit_start_row or DEFAULT_DEPOSIT_START,
         row.withdraw_start_row or DEFAULT_WITHDRAW_START,
     )
-    title = _tab_name(pending[0]) if pending else str(day.day)
-    worksheet = next((item for item in spreadsheet.worksheets() if str(item.title).strip() == title), None)
-    present = set()
     if worksheet is not None:
-        present = {str(value).strip() for value in worksheet.col_values(7) if str(value).strip()}
-    database_count = len({item.external_id for item in pending})
-    completed = len({item.external_id for item in pending if item.status == "COMPLETED"})
-    sheet_count = sum(1 for item_id in {item.external_id for item in pending} if item_id in present)
+        worksheet = next((item for item in spreadsheet.worksheets() if str(item.title).strip() == title), None)
+    present = _cashbook_ids(worksheet) if worksheet is not None else set()
+    wanted = {item.external_id for item in pending}
+    database_count = len(wanted)
+    sheet_count = len(wanted & present)
+    deposits = sum(1 for item in pending if item.type == "DEPOSIT")
+    withdraws = database_count - deposits
     detail = (
-        f"{database_count} deposit and withdrawal ids are in the database "
-        f"({completed} completed, {database_count - completed} rejected or still processing). "
-        f"The cards count only the completed ones. "
-        f"The Google Sheet has {sheet_count} of these ids, each id once."
+        f"Completed only: {deposits} deposits and {withdraws} withdrawals in the database. "
+        f"The Google Sheet has {sheet_count} of those ids, each id once."
     )
+    if removed:
+        detail += f" Removed {removed} rows that were not completed."
     if errors:
         detail = f"{detail} {' '.join(errors)}"
     GoogleSheetSetting.objects.filter(pk=row.pk).update(
@@ -280,6 +288,32 @@ def _write_cashbook(
             errors.append(f"Tab {title}: {str(exc).splitlines()[0][:180]}")
             log.warning("Google Sheet tab %s failed: %s", title, exc)
     return written, errors
+
+
+def _remove_uncompleted(worksheet, day) -> int:
+    """Clear cashbook rows whose transaction is a deposit or withdrawal that is not completed."""
+    unwanted = set(
+        Transaction.objects.filter(txn_date=day, type__in=["DEPOSIT", "WITHDRAW"])
+        .exclude(status="COMPLETED")
+        .values_list("external_id", flat=True)
+    )
+    if not unwanted:
+        return 0
+    ranges = []
+    cleared: list[str] = []
+    for index, value in enumerate(worksheet.col_values(7), start=1):
+        txn_id = str(value).strip()
+        if txn_id not in unwanted:
+            continue
+        ranges.append({"range": f"B{index}:J{index}", "values": [["", "", "", "", "", "", "", "", ""]]})
+        cleared.append(txn_id)
+    for offset in range(0, len(ranges), 200):
+        chunk = ranges[offset : offset + 200]
+        if chunk:
+            worksheet.batch_update(chunk, value_input_option="USER_ENTERED")
+    if cleared:
+        SheetExport.objects.filter(transaction__external_id__in=cleared, transaction__txn_date=day).delete()
+    return len(cleared)
 
 
 def _cashbook_ids(worksheet) -> set[str]:
