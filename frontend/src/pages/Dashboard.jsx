@@ -205,7 +205,8 @@ export default function Dashboard() {
     setRefreshing(true);
     setError("");
     try {
-      await api("/api/sync/", { method: "POST", body: { date } });
+      const synced = await api("/api/sync/", { method: "POST", body: { date } });
+      if (synced && synced.ok === false && synced.detail) setError(synced.detail);
       const params = new URLSearchParams({ date, group, brand, type: "All types", status: "All statuses" });
       const next = await api(`/api/dashboard/?${params.toString()}`);
       if (next?.revision) revision.current = String(next.revision);
@@ -1791,7 +1792,8 @@ function friendlyStatus(live, refreshing, data) {
   const time = line.match(/\d{2}:\d{2}:\d{2}/)?.[0] || "";
   const rows = line.match(/([\d,]+)\s+(?:API|saved) rows/);
   const count = rows ? Number(rows[1].replace(/,/g, "")).toLocaleString() : "";
-  if (line.includes("refused") || (line && !time && !count)) {
+  const blocked = /refused|timed out|not reachable|ConnectTimeout|did not accept/i.test(line);
+  if (blocked || (line && !time && !count)) {
     return { title: live ? "Live" : "Paused", detail: line };
   }
   return {

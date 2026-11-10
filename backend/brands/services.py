@@ -23,10 +23,16 @@ from brands.models import SYDNEY, BankLedgerSetting, BankTransfer, Brand, BrandS
 UTC = ZoneInfo("UTC")
 
 LIVE_STATUSES = ("PENDING", "COMPLETED", "REJECTED")
+_PAGE_SIZE = 100
+# A quiet day is a few pages. After a long outage the newest rows are past the old 40-page cutoff.
+_PAGE_CAP = 400
 _TAG_RE = re.compile(r"<span[^>]*>(.*?)</span>", re.I)
 _HTML_RE = re.compile(r"<[^>]+>")
 _lock = threading.Lock()
 _cache_lock = threading.Lock()
+_down_lock = threading.Lock()
+_down_until: dict[str, float] = {}
+_DOWN_FOR = 45.0
 _bank_status_lock = threading.Lock()
 _BANK_STATUS_TTL = 30.0
 _bank_status_cache: dict[int, tuple[float, set[tuple[str, str]]]] = {}
@@ -35,17 +41,17 @@ _http_local = threading.local()
 _TRANSIENT = {"ConnectionError", "Timeout", "ConnectTimeout", "ReadTimeout"}
 
 
-def sync_day(day: date, *, wait: bool = True) -> None:
+def sync_day(day: date, *, wait: bool = True) -> list[str]:
     acquired = _lock.acquire(blocking=wait)
     if not acquired:
-        return
+        return []
     try:
-        _sync_day(day)
+        return _sync_day(day)
     finally:
         _lock.release()
 
 
-def _sync_day(day: date) -> None:
+def _sync_day(day: date) -> list[str]:
     close_old_connections()
     try:
         brands = list(Brand.objects.filter(is_active=True))
@@ -58,13 +64,16 @@ def _sync_day(day: date) -> None:
             _save_company_banks(harvested)
         catalog = {item.external_id: item.account_name for item in CompanyBank.objects.all()}
         changed = False
+        messages: list[str] = []
         for brand, rows, errors in fetched:
             if rows and _store_rows(brand, day, rows, catalog):
                 changed = True
             if _save_sync(brand, day, " ".join(errors), len(rows)):
                 changed = True
+            messages.extend(errors)
         if changed or not livecache.has_snapshot(day):
             publish_snapshot(day)
+        return messages
     finally:
         close_old_connections()
 
@@ -92,6 +101,8 @@ def _collect_brand(brand: Brand, day: date) -> tuple[list[dict], list[str]]:
         return [], [f"{brand.name} has no token"]
     if not brand.merchant_id:
         return [], [f"{brand.name} merchant id is not set"]
+    if _host_down(brand.domain):
+        return [], [f"{brand.name}: the brand API did not accept a connection ({brand.domain})"]
     collected: list[dict] = []
     errors: list[str] = []
     day_text = day.isoformat()
@@ -120,7 +131,7 @@ def _collect_brand(brand: Brand, day: date) -> tuple[list[dict], list[str]]:
             status,
             "FORFEITED",
             force_full=pending_changed,
-            max_pages=250,
+            max_pages=_PAGE_CAP,
         )
         if error:
             errors.append(f"{brand.name} {status} FORFEITED: {error}")
@@ -132,7 +143,9 @@ def _read_status(brand: Brand, day: str, status: str, force_full: bool = False) 
     key = (brand.name, status, day)
     try:
         if status == "PENDING":
-            raw, error, total = fetch_brand(brand, day, status, max_pages=10)
+            raw, error, total = fetch_brand(brand, day, status, max_pages=1)
+            if not error and total > len(raw):
+                raw, error, total = fetch_brand(brand, day, status, max_pages=_PAGE_CAP)
             if not error:
                 _cache_put(key, {"sig": (total, ""), "raw": raw})
         else:
@@ -143,7 +156,7 @@ def _read_status(brand: Brand, day: str, status: str, force_full: bool = False) 
             if not error and not force_full and unchanged:
                 raw = cached["raw"]
             elif not error and (force_full or total > len(raw)):
-                raw, error, total = fetch_brand(brand, day, status, max_pages=40)
+                raw, error, total = fetch_brand(brand, day, status, max_pages=_PAGE_CAP)
                 head = str(raw[0].get("id") or "") if raw else ""
             if not error:
                 _cache_put(key, {"sig": (total, head), "raw": raw})
@@ -153,7 +166,7 @@ def _read_status(brand: Brand, day: str, status: str, force_full: bool = False) 
     except ValueError:
         error = "The brand API did not return JSON"
         raw = []
-    if error in _TRANSIENT:
+    if error in _TRANSIENT and error != "ConnectTimeout":
         cached = _cache_get(key)
         if cached and cached.get("raw"):
             return list(cached["raw"]), ""
@@ -170,7 +183,7 @@ def _read_typed(
     status: str,
     txn_type: str,
     force_full: bool = False,
-    max_pages: int = 40,
+    max_pages: int = _PAGE_CAP,
 ) -> tuple[list[dict], str]:
     """Completed deposits and withdrawals are paged separately so bank names are not cut off."""
     key = (brand.name, f"{status}:{txn_type}", day)
@@ -197,7 +210,7 @@ def _read_typed(
     except ValueError:
         error = "The brand API did not return JSON"
         raw = []
-    if error in _TRANSIENT:
+    if error in _TRANSIENT and error != "ConnectTimeout":
         cached = _cache_get(key)
         if cached and cached.get("raw"):
             return list(cached["raw"]), ""
@@ -222,12 +235,33 @@ def _reset_http() -> None:
             pass
 
 
+def _host_of(url: str) -> str:
+    return url.split("/")[2] if "://" in url else url
+
+
+def _host_down(domain: str) -> bool:
+    host = _host_of(domain if "://" in domain else f"https://{domain}")
+    with _down_lock:
+        return time.monotonic() < _down_until.get(host, 0.0)
+
+
+def _mark_down(url: str) -> None:
+    with _down_lock:
+        _down_until[_host_of(url)] = time.monotonic() + _DOWN_FOR
+
+
 def _post(url: str, form: dict) -> requests.Response:
-    """Retry a dropped connection. Brand hosts close idle sockets without warning."""
+    """Retry a dropped connection. A host that never accepts a socket is failed once."""
+    if _host_down(url):
+        raise requests.ConnectTimeout(f"Connection to {_host_of(url)} timed out")
     last: requests.RequestException | None = None
     for attempt in range(3):
         try:
             return _http().post(url, data=form, timeout=(5, 25))
+        except requests.ConnectTimeout as exc:
+            _reset_http()
+            _mark_down(url)
+            raise exc
         except (requests.ConnectionError, requests.Timeout) as exc:
             last = exc
             _reset_http()
@@ -252,9 +286,9 @@ def fetch_brand(brand: Brand, day: str, status: str, max_pages: int, txn_type: s
             "sDate": f"{day} 00:00:00",
             "eDate": f"{day} 23:59:59",
         }
+        form["pageSize"] = str(_PAGE_SIZE)
         if txn_type:
             form["type"] = txn_type
-            form["pageSize"] = "100"
         response = _post(url, form)
         body = response.json()
         if str(body.get("status") or "") != "SUCCESS":
@@ -643,6 +677,8 @@ def _load_active_banks(brands: list[Brand]) -> dict[int, set[tuple[str, str]] | 
 def _fetch_active_banks(brand: Brand) -> set[tuple[str, str]]:
     if not brand.domain or not brand.token or not brand.merchant_id:
         return set()
+    if _host_down(brand.domain):
+        raise requests.ConnectTimeout(f"Connection to {brand.domain} timed out")
     url = brand.domain.rstrip("/") + "/api/v1/index.php"
     response = _post(
         url,

@@ -210,8 +210,9 @@ class SyncView(APIView):
     def post(self, request):
         day = _parse_day(request.data.get("date") or request.query_params.get("date"))
         note_watch(day)
-        sync_day(day)
-        return Response({"ok": True, "date": day.isoformat()})
+        errors = sync_day(day)
+        detail = " ".join(errors)[:500]
+        return Response({"ok": not errors, "date": day.isoformat(), "detail": detail})
 
 
 def _refused_ip(errors: list[str]) -> str:
