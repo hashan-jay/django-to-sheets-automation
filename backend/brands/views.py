@@ -10,7 +10,7 @@ from brands import livecache
 from brands.models import SYDNEY, Brand, sydney_today
 from brands.poller import note_watch, start_poller
 from brands.customers import customer_board, start_customer_sync
-from brands.sheets import export_pending, public_status, save_sheet_url, save_start_rows
+from brands.sheets import export_pending, public_status, save_sheet_url, save_start_rows, sync_brands_for_day
 from brands.services import (
     bank_accounts,
     bank_ledger,
@@ -43,6 +43,21 @@ class GoogleSheetView(APIView):
         body = public_status()
         body["written_now"] = written
         return Response(body)
+
+
+class GoogleSheetSyncView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        day = _parse_day(request.data.get("date"))
+        try:
+            result = sync_brands_for_day(day)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=400)
+        except Exception as exc:
+            message = str(exc).splitlines()[0][:500] or "The Google Sheet could not be updated."
+            return Response({"detail": message}, status=502)
+        return Response(result)
 
 
 class BrandListView(APIView):

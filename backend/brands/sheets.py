@@ -114,6 +114,62 @@ def public_status() -> dict:
     }
 
 
+def sync_brands_for_day(day) -> dict:
+    """Write every deposit and withdrawal for the day, then compare counts with the sheet."""
+    if not _lock.acquire(timeout=180):
+        raise ValueError("A Google Sheet sync is already running.")
+    try:
+        return _sync_brands_for_day(day)
+    finally:
+        _lock.release()
+
+
+def _sync_brands_for_day(day) -> dict:
+    row = sheet_setting()
+    sheet_id = normalize_google_sheet_id(row.sheet_url)
+    if not sheet_id:
+        raise ValueError("Save a Google Sheet link first.")
+    pending = list(
+        Transaction.objects.filter(txn_date=day, type__in=["DEPOSIT", "WITHDRAW"], brand__is_active=True)
+        .select_related("brand")
+        .order_by("created_at", "id")
+    )
+    spreadsheet = _open_spreadsheet(sheet_id)
+    written, errors = _write_cashbook(
+        spreadsheet,
+        pending,
+        row.deposit_start_row or DEFAULT_DEPOSIT_START,
+        row.withdraw_start_row or DEFAULT_WITHDRAW_START,
+    )
+    title = _tab_name(pending[0]) if pending else str(day.day)
+    worksheet = next((item for item in spreadsheet.worksheets() if str(item.title).strip() == title), None)
+    present = set()
+    if worksheet is not None:
+        present = {str(value).strip() for value in worksheet.col_values(7) if str(value).strip()}
+    database_count = len({item.external_id for item in pending})
+    completed = len({item.external_id for item in pending if item.status == "COMPLETED"})
+    sheet_count = sum(1 for item_id in {item.external_id for item in pending} if item_id in present)
+    detail = (
+        f"{database_count} deposit and withdrawal ids are in the database "
+        f"({completed} completed, {database_count - completed} rejected or still processing). "
+        f"The cards count only the completed ones. "
+        f"The Google Sheet has {sheet_count} of these ids, each id once."
+    )
+    if errors:
+        detail = f"{detail} {' '.join(errors)}"
+    GoogleSheetSetting.objects.filter(pk=row.pk).update(
+        last_error="" if sheet_count == database_count and not errors else detail[:500],
+        last_written_at=timezone.now() if written else row.last_written_at,
+    )
+    return {
+        "ok": sheet_count == database_count and not errors,
+        "database_count": database_count,
+        "sheet_count": sheet_count,
+        "written": len(written),
+        "detail": detail,
+    }
+
+
 def export_pending(limit: int = 40) -> int:
     """Append rows that have not been written yet. Safe to call from the poller."""
     if not _lock.acquire(blocking=False):
@@ -194,14 +250,25 @@ def _write_cashbook(
             continue
         try:
             ids = worksheet.col_values(7)
-            existing = {str(value).strip() for value in ids if str(value).strip()}
-            already = [item for item in items if item.external_id in existing]
-            fresh = [item for item in items if item.external_id not in existing]
+            existing = _cashbook_ids(worksheet)
+            _clear_duplicate_ids(worksheet, ids)
+            seen: set[str] = set()
+            unique_items: list[Transaction] = []
+            for item in items:
+                if not item.external_id or item.external_id in seen:
+                    continue
+                seen.add(item.external_id)
+                unique_items.append(item)
+            already = [item for item in unique_items if item.external_id in existing]
+            fresh = [item for item in unique_items if item.external_id not in existing]
             _remember(already)
             deposits = [item for item in fresh if item.type != "WITHDRAW"]
             withdraws = [item for item in fresh if item.type == "WITHDRAW"]
             placed = _write_block(worksheet, ids, deposits, deposit_start, deposit_end)
-            withdraw_end = max(worksheet.row_count, withdraw_start + 400)
+            needed_rows = withdraw_start + len(withdraws) + 5
+            if worksheet.row_count < needed_rows:
+                worksheet.add_rows(needed_rows - worksheet.row_count)
+            withdraw_end = max(worksheet.row_count, needed_rows)
             placed += _write_block(worksheet, ids, withdraws, withdraw_start, withdraw_end)
             _remember(placed)
             written.extend(already)
@@ -213,6 +280,36 @@ def _write_cashbook(
             errors.append(f"Tab {title}: {str(exc).splitlines()[0][:180]}")
             log.warning("Google Sheet tab %s failed: %s", title, exc)
     return written, errors
+
+
+def _cashbook_ids(worksheet) -> set[str]:
+    """Transaction ids already on this tab. Bank-summary numbers in column G are not ids."""
+    found: set[str] = set()
+    for row in worksheet.get("F:G"):
+        status = str(row[0]).strip() if row else ""
+        txn_id = str(row[1]).strip() if len(row) > 1 else ""
+        if status in {"Deposit", "Withdraw"} and txn_id:
+            found.add(txn_id)
+    return found
+
+
+def _clear_duplicate_ids(worksheet, id_column: list[str]) -> None:
+    """Blank a later cashbook row when its transaction id is already on an earlier row."""
+    seen: dict[str, int] = {}
+    ranges = []
+    for index, value in enumerate(id_column, start=1):
+        txn_id = str(value).strip()
+        if not txn_id or not txn_id.isdigit():
+            continue
+        if txn_id in seen:
+            ranges.append({"range": f"B{index}:J{index}", "values": [["", "", "", "", "", "", "", "", ""]]})
+            id_column[index - 1] = ""
+            continue
+        seen[txn_id] = index
+    for offset in range(0, len(ranges), 200):
+        chunk = ranges[offset : offset + 200]
+        if chunk:
+            worksheet.batch_update(chunk, value_input_option="USER_ENTERED")
 
 
 def _remember(items: list[Transaction]) -> None:

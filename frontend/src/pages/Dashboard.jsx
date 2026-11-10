@@ -75,6 +75,7 @@ export default function Dashboard() {
   const [withdrawStart, setWithdrawStart] = useState("1024");
   const [sheetNote, setSheetNote] = useState("");
   const [sheetBusy, setSheetBusy] = useState(false);
+  const [sheetSyncing, setSheetSyncing] = useState(false);
   const [rowsBusy, setRowsBusy] = useState(false);
   const [brand, setBrand] = useState("All");
   const [date, setDate] = useState(today);
@@ -122,6 +123,19 @@ export default function Dashboard() {
       setSheetNote(err.message);
     } finally {
       setRowsBusy(false);
+    }
+  }
+
+  async function syncSheet() {
+    setSheetSyncing(true);
+    setSheetNote("");
+    try {
+      const result = await api("/api/google-sheet/sync/", { method: "POST", body: { date } });
+      setSheetNote(result.detail || "Google Sheet sync finished.");
+    } catch (err) {
+      setSheetNote(err.message);
+    } finally {
+      setSheetSyncing(false);
     }
   }
 
@@ -309,7 +323,16 @@ export default function Dashboard() {
             onChange={(event) => setWithdrawStart(event.target.value.replace(/[^\d]/g, ""))}
           />
         </label>
-        <button type="submit" disabled={rowsBusy || !startRowsValid}>{rowsBusy ? "Saving…" : "Save rows"}</button>
+        <button type="submit" disabled={rowsBusy || sheetSyncing || !startRowsValid}>{rowsBusy ? "Saving…" : "Save rows"}</button>
+        <button
+          type="button"
+          className="sheet-sync"
+          onClick={syncSheet}
+          disabled={sheetSyncing || sheetBusy || rowsBusy || !sheetUrl.trim()}
+          aria-busy={sheetSyncing}
+        >
+          {sheetSyncing ? "Syncing with Google Sheet…" : "Sync with Google Sheet"}
+        </button>
         <p className="sheet-start-hint">
           {startRowsValid
             ? `Deposits use empty rows ${depositNumber}–${withdrawNumber - 1}. Withdrawals start at ${withdrawNumber}.`

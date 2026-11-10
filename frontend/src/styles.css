@@ -223,6 +223,9 @@ button {
   font-weight: 700;
 }
 
+.sheet-starts button.sheet-sync {
+  min-width: 220px;
+}
 .sheet-starts button:disabled {
   opacity: 0.7;
   cursor: wait;
