@@ -619,7 +619,7 @@ def _bank_key(bank_name: str, account_name: str) -> tuple[str, str]:
     )
 
 
-def _active_bank_keys(brand: Brand | None = None, brands: list[Brand] | None = None) -> set[tuple[str, str]]:
+def _active_bank_pairs(brand: Brand | None = None, brands: list[Brand] | None = None) -> set[tuple[str, str]]:
     """Bank code and account name pairs the finance API currently marks ACTIVE.
 
     Each brand's /banks/getBank list has one active account. A group or every
@@ -654,6 +654,10 @@ def _active_bank_keys(brand: Brand | None = None, brands: list[Brand] | None = N
             _bank_status_cache[item.pk] = (time.monotonic(), fresh)
             keys |= fresh
     return keys
+
+
+def _active_bank_keys(brand: Brand | None = None, brands: list[Brand] | None = None) -> set[tuple[str, str]]:
+    return {_bank_key(code, account) for code, account in _active_bank_pairs(brand, brands)}
 
 
 def _load_active_banks(brands: list[Brand]) -> dict[int, set[tuple[str, str]] | None]:
@@ -699,9 +703,9 @@ def _fetch_active_banks(brand: Brand) -> set[tuple[str, str]]:
         if str(item.get("status") or "").strip().upper() != "ACTIVE":
             continue
         code = str(item.get("code") or "").strip()
-        account = str(item.get("accountName") or "").strip()
+        account = _clean_label(item.get("accountName"))
         if code and account:
-            active.add(_bank_key(code, account))
+            active.add((code, account))
     return active
 
 
@@ -843,9 +847,14 @@ def _ledger_rows(day: date, brand: Brand | None = None, grouped: list[Brand] | N
         (item.bank_name, item.account_name): item
         for item in BankLedgerSetting.objects.all()
     }
-    active_keys = _active_bank_keys(brand, grouped)
+    active_pairs = _active_bank_pairs(brand, grouped)
+    active_keys = {_bank_key(code, account) for code, account in active_pairs}
     moves = _transfer_maps(day)
     keys = set(prior) | set(current) | _transfer_keys_for_scope(day, brand, grouped, set(prior) | set(current))
+    present = {_bank_key(bank_name, account_name) for bank_name, account_name in keys}
+    for code, account in active_pairs:
+        if _bank_key(code, account) not in present:
+            keys.add((code, account))
     rows = []
     for key in keys:
         bank_name, account_name = key
