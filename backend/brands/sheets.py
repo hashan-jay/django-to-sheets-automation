@@ -143,6 +143,7 @@ def _sync_brands_for_day(day) -> dict:
     title = str(day.day)
     worksheet = next((item for item in spreadsheet.worksheets() if str(item.title).strip() == title), None)
     removed = _remove_uncompleted(worksheet, day) if worksheet is not None else 0
+    _write_payment_methods(spreadsheet, day)
     written, errors = _write_cashbook(
         spreadsheet,
         pending,
@@ -316,6 +317,43 @@ def _remove_uncompleted(worksheet, day) -> int:
     return len(cleared)
 
 
+def _write_payment_methods(spreadsheet, day) -> int:
+    """Put the payment method in Bank for completed rows that have no bank account."""
+    items = list(
+        Transaction.objects.filter(
+            txn_date=day,
+            status="COMPLETED",
+            type__in=["DEPOSIT", "WITHDRAW"],
+            bank_name="",
+            bank_account_name="",
+        )
+        .exclude(method="")
+        .only("external_id", "method", "txn_date")
+    )
+    if not items:
+        return 0
+    title = str(day.day)
+    worksheet = next((item for item in spreadsheet.worksheets() if str(item.title).strip() == title), None)
+    if worksheet is None:
+        return 0
+    positions: dict[str, int] = {}
+    for index, value in enumerate(worksheet.col_values(7), start=1):
+        key = str(value).strip()
+        if key and key not in positions:
+            positions[key] = index
+    ranges = []
+    for item in items:
+        slot = positions.get(item.external_id)
+        if slot is None:
+            continue
+        ranges.append({"range": f"C{slot}", "values": [[item.method.strip()]]})
+    for offset in range(0, len(ranges), 200):
+        chunk = ranges[offset : offset + 200]
+        if chunk:
+            worksheet.batch_update(chunk, value_input_option="USER_ENTERED")
+    return len(ranges)
+
+
 def _cashbook_ids(worksheet) -> set[str]:
     """Transaction ids already on this tab. Bank-summary numbers in column G are not ids."""
     found: set[str] = set()
@@ -418,10 +456,13 @@ def _when(item: Transaction) -> str:
 
 
 def _sheet_bank(item: Transaction) -> str:
-    """Google Sheet Bank is the web app bank name and bank account name together."""
+    """Bank column is the bank name plus account name, or the payment method when there is no bank."""
     bank = (item.bank_name or "").strip()
     account = (item.bank_account_name or "").strip()
-    return " ".join(part for part in (bank, account) if part)
+    label = " ".join(part for part in (bank, account) if part)
+    if label:
+        return label
+    return (item.method or "").strip()
 
 
 def _cashbook_cells(item: Transaction) -> list[str]:
