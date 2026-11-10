@@ -141,7 +141,7 @@ export default function Login({ onSuccess }) {
           <div className="login-card-glow" aria-hidden="true" />
           <header>
             <span className="login-badge">SYS / AUTH</span>
-            <h1>KABOOM77 Automation</h1>
+            <h1>Group AH</h1>
             <p>Sign in to open the live transaction console.</p>
           </header>
 

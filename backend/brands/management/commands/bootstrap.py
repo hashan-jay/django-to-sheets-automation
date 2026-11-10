@@ -6,7 +6,8 @@ from django.core.management.base import BaseCommand
 from brands.models import Brand
 
 BRANDS = (
-    {"name": "KABOOM77", "prefix": "KABOOM77", "domain": "https://kaboom77.com", "group": "SOLO - KABOOM", "sort_order": 1},
+    {"name": "KABOOM77", "prefix": "KABOOM77", "domain": "https://kaboom77.com", "group": "GROUP AH", "sort_order": 1},
+    {"name": "WOOSPIN", "prefix": "WOOSPIN", "domain": "https://woospin.com", "group": "GROUP AH", "sort_order": 2},
 )
 
 

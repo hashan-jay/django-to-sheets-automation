@@ -262,7 +262,7 @@ export default function Dashboard() {
     <section className="command" aria-label="Filters">
     <div className="command-head">
       <div>
-        <h2>KABOOM77</h2>
+        <h2>Group AH</h2>
         <p>Balances and transactions follow the date you pick. Completed rows are written to that day’s sheet tab.</p>
       </div>
       <p className="command-scope">{formatDay(date)}</p>

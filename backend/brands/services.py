@@ -99,8 +99,6 @@ def _fetch_brands(brands: list[Brand], day: date) -> list[tuple[Brand, list[dict
 def _collect_brand(brand: Brand, day: date) -> tuple[list[dict], list[str]]:
     if not brand.token:
         return [], [f"{brand.name} has no token"]
-    if not brand.merchant_id:
-        return [], [f"{brand.name} merchant id is not set"]
     if _host_down(brand.domain):
         return [], [f"{brand.name}: the brand API did not accept a connection ({brand.domain})"]
     collected: list[dict] = []
@@ -675,7 +673,7 @@ def _load_active_banks(brands: list[Brand]) -> dict[int, set[tuple[str, str]] | 
 
 
 def _fetch_active_banks(brand: Brand) -> set[tuple[str, str]]:
-    if not brand.domain or not brand.token or not brand.merchant_id:
+    if not brand.domain or not brand.token:
         return set()
     if _host_down(brand.domain):
         raise requests.ConnectTimeout(f"Connection to {brand.domain} timed out")
@@ -1293,7 +1291,7 @@ def transaction_record(brand_name: str, external_id: str) -> tuple[dict | None, 
         return None, "That transaction was not found."
     if not Transaction.objects.filter(brand=brand, external_id=external_id).exists():
         return None, "That transaction was not found."
-    if not brand.token or not brand.merchant_id:
+    if not brand.token:
         return None, f"{brand.name} has no API access configured."
 
     url = brand.domain.rstrip("/") + "/api/v1/index.php"
