@@ -37,6 +37,12 @@ class Brand(models.Model):
         return self.name
 
 
+def is_gateway_method(value: object) -> bool:
+    """AtasPay and AmoPay (including AmoPayRamp) are payment methods, not company banks."""
+    text = "".join(str(value or "").casefold().split())
+    return "ataspay" in text or "amopay" in text
+
+
 class Transaction(models.Model):
     brand = models.ForeignKey(Brand, on_delete=models.CASCADE, related_name="transactions")
     external_id = models.CharField(max_length=64)
@@ -77,9 +83,9 @@ class Transaction(models.Model):
             "mobile": self.mobile,
             "amount": f"{self.amount:.2f}",
             "type": self.type,
-            "bank_name": self.bank_name if self.status == "COMPLETED" and self.type in {"DEPOSIT", "WITHDRAW"} else "",
-            "bank_account_name": self.bank_account_name if self.status == "COMPLETED" and self.type in {"DEPOSIT", "WITHDRAW"} else "",
-            "payment_method": "" if (self.bank_name or self.bank_account_name) else self.method,
+            "bank_name": "" if is_gateway_method(self.method) else (self.bank_name if self.status == "COMPLETED" and self.type in {"DEPOSIT", "WITHDRAW"} else ""),
+            "bank_account_name": "" if is_gateway_method(self.method) else (self.bank_account_name if self.status == "COMPLETED" and self.type in {"DEPOSIT", "WITHDRAW"} else ""),
+            "payment_method": self.method if is_gateway_method(self.method) else ("" if (self.bank_name or self.bank_account_name) else self.method),
             "bank": self.bank,
             "acc_name": self.acc_name,
             "acc_no": self.acc_no,

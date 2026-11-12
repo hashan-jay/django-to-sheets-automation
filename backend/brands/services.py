@@ -18,7 +18,7 @@ from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from brands import livecache
-from brands.models import SYDNEY, BankLedgerSetting, BankTransfer, Brand, BrandSync, CompanyBank, Transaction, _clock, sydney_today
+from brands.models import SYDNEY, BankLedgerSetting, BankTransfer, Brand, BrandSync, CompanyBank, Transaction, _clock, is_gateway_method, sydney_today
 
 UTC = ZoneInfo("UTC")
 
@@ -316,7 +316,9 @@ def _store_rows(brand: Brand, day: date, raw_rows: list[dict], catalog: dict[str
         detail = " · ".join(part for part in (extra, _detail(raw)) if part)
         created = _parse_dt(raw.get("createdDateTime"))
         processed = _parse_dt(raw.get("processedDateTime"))
-        company_code, company_account = _company_bank_for_transaction(raw, company_banks)
+        method = _method(raw)[:128]
+        gateway = is_gateway_method(method)
+        company_code, company_account = ("", "") if gateway else _company_bank_for_transaction(raw, company_banks)
         prepared.append(
             Transaction(
                 brand=brand,
@@ -329,13 +331,13 @@ def _store_rows(brand: Brand, day: date, raw_rows: list[dict], catalog: dict[str
                 player_name=str(user.get("originalName") or _HTML_RE.sub("", str(user.get("name") or "")))[:255],
                 mobile=str(user.get("mobile") or "")[:64],
                 bank=str(bank.get("bank") or "")[:128],
-                bank_name=company_code or _selected_bank_name(raw),
-                bank_account_name=company_account or _bank_account_name(raw, catalog or {}, company_banks),
+                bank_name="" if gateway else (company_code or _selected_bank_name(raw)),
+                bank_account_name="" if gateway else (company_account or _bank_account_name(raw, catalog or {}, company_banks)),
                 acc_name=str(bank.get("bankAccountName") or "")[:255],
                 acc_no=str(bank.get("bankAccountNumber") or "")[:64],
                 bsb=str(bank.get("bankBSB") or "")[:32],
                 pay_id=str(bank.get("payID") or "")[:128],
-                method=_method(raw)[:128],
+                method=method,
                 detail=detail,
                 created_at=created,
                 processed_at=processed,
@@ -552,10 +554,16 @@ def tally_system_banks(day: date) -> dict:
                 txn_date=day,
                 status="COMPLETED",
                 type__in=["DEPOSIT", "WITHDRAW"],
-            ).only("id", "bank_name", "bank_account_name")
+            ).only("id", "bank_name", "bank_account_name", "method")
         )
         changed = []
         for txn in rows:
+            if is_gateway_method(txn.method):
+                if txn.bank_name or txn.bank_account_name:
+                    txn.bank_name = ""
+                    txn.bank_account_name = ""
+                    changed.append(txn)
+                continue
             code, account = _tally_stored_bank(txn.bank_name, banks, active)
             if not account or (txn.bank_name == code and txn.bank_account_name == account):
                 continue
