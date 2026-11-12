@@ -57,11 +57,6 @@ def _sync_day(day: date) -> list[str]:
         brands = list(Brand.objects.filter(is_active=True))
         close_old_connections()
         fetched = _fetch_brands(brands, day)
-        harvested: dict[str, tuple[str, str]] = {}
-        for _brand, rows, _errors in fetched:
-            harvested.update(_harvest_banks(rows))
-        if harvested:
-            _save_company_banks(harvested)
         catalog = {item.external_id: item.account_name for item in CompanyBank.objects.all()}
         changed = False
         messages: list[str] = []
@@ -305,6 +300,10 @@ def fetch_brand(brand: Brand, day: str, status: str, max_pages: int, txn_type: s
 
 
 def _store_rows(brand: Brand, day: date, raw_rows: list[dict], catalog: dict[str, str] | None = None) -> bool:
+    try:
+        company_banks = _company_banks(brand)
+    except (requests.RequestException, ValueError, TypeError):
+        company_banks = []
     prepared = []
     for raw in raw_rows:
         external_id = str(raw.get("id") or "").strip()
@@ -317,6 +316,7 @@ def _store_rows(brand: Brand, day: date, raw_rows: list[dict], catalog: dict[str
         detail = " · ".join(part for part in (extra, _detail(raw)) if part)
         created = _parse_dt(raw.get("createdDateTime"))
         processed = _parse_dt(raw.get("processedDateTime"))
+        company_code, company_account = _company_bank_for_transaction(raw, company_banks)
         prepared.append(
             Transaction(
                 brand=brand,
@@ -329,8 +329,8 @@ def _store_rows(brand: Brand, day: date, raw_rows: list[dict], catalog: dict[str
                 player_name=str(user.get("originalName") or _HTML_RE.sub("", str(user.get("name") or "")))[:255],
                 mobile=str(user.get("mobile") or "")[:64],
                 bank=str(bank.get("bank") or "")[:128],
-                bank_name=_selected_bank_name(raw),
-                bank_account_name=_bank_account_name(raw, catalog or {}),
+                bank_name=company_code or _selected_bank_name(raw),
+                bank_account_name=company_account or _bank_account_name(raw, catalog or {}, company_banks),
                 acc_name=str(bank.get("bankAccountName") or "")[:255],
                 acc_no=str(bank.get("bankAccountNumber") or "")[:64],
                 bsb=str(bank.get("bankBSB") or "")[:32],
@@ -344,6 +344,13 @@ def _store_rows(brand: Brand, day: date, raw_rows: list[dict], catalog: dict[str
     if not prepared:
         return False
     prepared = list({item.external_id: item for item in prepared}.values())
+    _save_company_banks(
+        {
+            bank_id: (code, account)
+            for bank_id, code, account, _status in company_banks
+            if bank_id and code and account
+        }
+    )
     signature = _signature(prepared)
     signature_key = f"brands:sig:{brand.pk}:{day.isoformat()}"
     if livecache.same(signature_key, signature):
@@ -442,19 +449,112 @@ def _save_company_banks(found: dict[str, tuple[str, str]]) -> None:
     )
 
 
-def _bank_account_name(raw: dict, catalog: dict[str, str]) -> str:
-    """Organization account that received a deposit or paid a withdrawal."""
+def _bank_account_name(raw: dict, catalog: dict[str, str], company_banks: list[tuple[str, str, str, str]] | None = None) -> str:
+    """Organization account that received a deposit or paid a withdrawal.
+
+    The player's own account name on the transaction is not the company bank.
+    Use it only when it is one of the accounts returned by /banks/getBank.
+    """
     if str(raw.get("status") or "") != "COMPLETED":
         return ""
     if str(raw.get("type") or "") not in {"DEPOSIT", "WITHDRAW"}:
         return ""
+    known = {account.casefold() for _bank_id, _code, account, _status in (company_banks or []) if account}
     account_name = _clean_label(_org_bank(raw).get("accountName"))
-    if account_name:
+    if account_name and (not known or account_name.casefold() in known):
         return account_name[:255]
     bank_id = str(raw.get("bankId") or "").strip()
     if not bank_id or bank_id in {"0", "None"}:
         return ""
-    return str(catalog.get(bank_id) or "")[:255]
+    saved = str(catalog.get(bank_id) or "")
+    if saved and (not known or saved.casefold() in known):
+        return saved[:255]
+    return ""
+
+
+def _company_bank_for_transaction(raw: dict, company_banks: list[tuple[str, str, str, str]]) -> tuple[str, str]:
+    """Match a completed deposit or withdrawal to the brand's company bank list.
+
+    The bank list is the same API token as the transactions. When one account is
+    ACTIVE, that is the account the ledger shows, so the transaction uses it too.
+    """
+    if str(raw.get("status") or "") != "COMPLETED":
+        return "", ""
+    if str(raw.get("type") or "") not in {"DEPOSIT", "WITHDRAW"}:
+        return "", ""
+    if not company_banks:
+        return "", ""
+    active = [item for item in company_banks if item[3] == "ACTIVE"]
+    code = _selected_bank_name(raw).strip()
+    bank_id = str(_org_bank(raw).get("id") or raw.get("bankId") or "").strip()
+    if bank_id and bank_id not in {"0", "None"}:
+        for item_id, item_code, account, _status in company_banks:
+            if item_id == bank_id and account:
+                return item_code, account
+    if code:
+        matched = [item for item in active if item[1].casefold() == code.casefold() and item[2]]
+        if len(matched) == 1:
+            return matched[0][1], matched[0][2]
+    if len(active) == 1 and active[0][1] and active[0][2]:
+        return active[0][1], active[0][2]
+    return "", ""
+
+
+_company_bank_lock = threading.Lock()
+_company_bank_cache: dict[int, tuple[float, list[tuple[str, str, str, str]]]] = {}
+
+
+def _company_banks(brand: Brand) -> list[tuple[str, str, str, str]]:
+    """(id, code, account name, status) from /banks/getBank, refreshed throughout the day."""
+    now = time.monotonic()
+    with _company_bank_lock:
+        cached = _company_bank_cache.get(brand.pk)
+        if cached and now - cached[0] < _BANK_STATUS_TTL:
+            return cached[1]
+    try:
+        loaded = _fetch_company_banks(brand)
+    except (requests.RequestException, ValueError, TypeError):
+        with _company_bank_lock:
+            previous = _company_bank_cache.get(brand.pk)
+        if previous:
+            return previous[1]
+        raise
+    with _company_bank_lock:
+        _company_bank_cache[brand.pk] = (time.monotonic(), loaded)
+    return loaded
+
+
+def _fetch_company_banks(brand: Brand) -> list[tuple[str, str, str, str]]:
+    if not brand.domain or not brand.token:
+        return []
+    if _host_down(brand.domain):
+        raise requests.ConnectTimeout(f"Connection to {brand.domain} timed out")
+    url = brand.domain.rstrip("/") + "/api/v1/index.php"
+    response = _post(
+        url,
+        {
+            "module": "/banks/getBank",
+            "accessId": brand.access_id,
+            "accessToken": brand.token,
+            "merchantId": brand.merchant_id,
+        },
+    )
+    body = response.json()
+    if str(body.get("status") or "") != "SUCCESS":
+        raise ValueError("The brand bank list was refused")
+    data = body.get("data")
+    rows = data if isinstance(data, list) else []
+    found: list[tuple[str, str, str, str]] = []
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        code = str(item.get("code") or "").strip()[:128]
+        account = _clean_label(item.get("accountName"))[:255]
+        status = str(item.get("status") or "").strip().upper()
+        bank_id = str(item.get("id") or "").strip()
+        if code and account:
+            found.append((bank_id, code, account, status))
+    return found
 
 
 def _bank(value: object) -> dict:
@@ -684,36 +784,7 @@ def _load_active_banks(brands: list[Brand]) -> dict[int, set[tuple[str, str]] | 
 
 
 def _fetch_active_banks(brand: Brand) -> set[tuple[str, str]]:
-    if not brand.domain or not brand.token:
-        return set()
-    if _host_down(brand.domain):
-        raise requests.ConnectTimeout(f"Connection to {brand.domain} timed out")
-    url = brand.domain.rstrip("/") + "/api/v1/index.php"
-    response = _post(
-        url,
-        {
-            "module": "/banks/getBank",
-            "accessId": brand.access_id,
-            "accessToken": brand.token,
-            "merchantId": brand.merchant_id,
-        },
-    )
-    body = response.json()
-    if str(body.get("status") or "") != "SUCCESS":
-        raise ValueError("The brand bank list was refused")
-    data = body.get("data")
-    rows = data if isinstance(data, list) else []
-    active: set[tuple[str, str]] = set()
-    for item in rows:
-        if not isinstance(item, dict):
-            continue
-        if str(item.get("status") or "").strip().upper() != "ACTIVE":
-            continue
-        code = str(item.get("code") or "").strip()
-        account = _clean_label(item.get("accountName"))
-        if code and account:
-            active.add((code, account))
-    return active
+    return {(code, account) for _bank_id, code, account, status in _company_banks(brand) if status == "ACTIVE"}
 
 
 def bank_ledger(day: date, brand_name: str = "All", group_name: str = "All") -> dict:
