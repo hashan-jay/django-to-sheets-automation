@@ -375,6 +375,13 @@ def _store_rows(brand: Brand, day: date, raw_rows: list[dict], catalog: dict[str
             ],
         )
     livecache.store(signature_key, signature)
+    if any(
+        item.status == "COMPLETED" and item.type in {"DEPOSIT", "WITHDRAW"}
+        for item in prepared
+    ):
+        from brands.sheets import request_export
+
+        request_export()
     return True
 
 

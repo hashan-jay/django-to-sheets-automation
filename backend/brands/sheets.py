@@ -8,9 +8,11 @@ from __future__ import annotations
 import logging
 import re
 import threading
+import time
 from pathlib import Path
 
 from django.conf import settings
+from django.db import close_old_connections
 from django.db import transaction as db_transaction
 from django.utils import timezone
 
@@ -21,6 +23,9 @@ log = logging.getLogger("django")
 _SHEET_URL_RE = re.compile(r"/spreadsheets/d/([a-zA-Z0-9-_]+)")
 _GID_RE = re.compile(r"[?#&]gid=(\d+)")
 _lock = threading.Lock()
+_wake = threading.Event()
+_writer_started = False
+_writer_guard = threading.Lock()
 
 CREDENTIALS = Path(settings.BASE_DIR).parent / "secrets" / "google-sheets.json"
 DEFAULT_SHEET_URL = (
@@ -179,10 +184,49 @@ def _sync_brands_for_day(day) -> dict:
     }
 
 
-def export_pending(limit: int = 40) -> int:
-    """Append rows that have not been written yet. Safe to call from the poller."""
+def request_export() -> None:
+    """Wake the sheet writer immediately. Safe to call after new completed rows are stored."""
+    _wake.set()
+
+
+def start_writer() -> None:
+    """Keep writing completed rows for as long as this process is running."""
+    global _writer_started
+    with _writer_guard:
+        if _writer_started:
+            return
+        _writer_started = True
+    thread = threading.Thread(target=_writer_loop, name="sheet-writer", daemon=True)
+    thread.start()
+
+
+def _writer_loop() -> None:
+    while True:
+        _wake.wait(timeout=1)
+        _wake.clear()
+        try:
+            close_old_connections()
+            while True:
+                count = export_pending(limit=200)
+                if count < 0:
+                    time.sleep(0.25)
+                    continue
+                if count == 0:
+                    break
+        except Exception:
+            log.exception("Google Sheet export failed")
+        finally:
+            close_old_connections()
+
+
+def export_pending(limit: int = 200) -> int:
+    """Append rows that have not been written yet.
+
+    Returns the number written, 0 when nothing is waiting, or -1 when another
+    sheet write is already in progress.
+    """
     if not _lock.acquire(blocking=False):
-        return 0
+        return -1
     try:
         return _export_pending(limit)
     finally:
