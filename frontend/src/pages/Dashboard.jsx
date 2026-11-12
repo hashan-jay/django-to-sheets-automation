@@ -78,6 +78,7 @@ export default function Dashboard() {
   const [sheetBusy, setSheetBusy] = useState(false);
   const [sheetSyncing, setSheetSyncing] = useState(false);
   const [rowsBusy, setRowsBusy] = useState(false);
+  const [tallying, setTallying] = useState(false);
   const [brand, setBrand] = useState("All");
   const [date, setDate] = useState(today);
   const [type, setType] = useState("All types");
@@ -137,6 +138,20 @@ export default function Dashboard() {
       setSheetNote(err.message);
     } finally {
       setSheetSyncing(false);
+    }
+  }
+
+  async function tallyBanks() {
+    setTallying(true);
+    setSheetNote("");
+    try {
+      const result = await api("/api/banks/tally/", { method: "POST", body: { date } });
+      setSheetNote(result.detail || "Tallied completed deposits and withdrawals with the current system banks.");
+      revision.current = "";
+    } catch (err) {
+      setSheetNote(err.message);
+    } finally {
+      setTallying(false);
     }
   }
 
@@ -324,15 +339,24 @@ export default function Dashboard() {
             onChange={(event) => setWithdrawStart(event.target.value.replace(/[^\d]/g, ""))}
           />
         </label>
-        <button type="submit" disabled={rowsBusy || sheetSyncing || !startRowsValid}>{rowsBusy ? "Saving…" : "Save rows"}</button>
+        <button type="submit" disabled={rowsBusy || sheetSyncing || tallying || !startRowsValid}>{rowsBusy ? "Saving…" : "Save rows"}</button>
         <button
           type="button"
           className="sheet-sync"
           onClick={syncSheet}
-          disabled={sheetSyncing || sheetBusy || rowsBusy || !sheetUrl.trim()}
+          disabled={sheetSyncing || sheetBusy || rowsBusy || tallying || !sheetUrl.trim()}
           aria-busy={sheetSyncing}
         >
           {sheetSyncing ? "Syncing with Google Sheet…" : "Sync with Google Sheet"}
+        </button>
+        <button
+          type="button"
+          className="sheet-tally"
+          onClick={tallyBanks}
+          disabled={tallying || sheetSyncing || rowsBusy || sheetBusy}
+          aria-busy={tallying}
+        >
+          Tally System Banks
         </button>
         <p className="sheet-start-hint">
           {startRowsValid
@@ -341,9 +365,17 @@ export default function Dashboard() {
         </p>
       </form>
       {sheetNote && (
-        <p className={sheetNote.startsWith("Saved") || sheetNote.startsWith("Wrote") ? "sheet-url-note is-ok" : "sheet-url-note is-error"} role="status">
+        <p className={sheetNote.startsWith("Saved") || sheetNote.startsWith("Wrote") || sheetNote.startsWith("Tallied") ? "sheet-url-note is-ok" : "sheet-url-note is-error"} role="status">
           {sheetNote}
         </p>
+      )}
+      {tallying && (
+        <div className="tally-overlay" role="status" aria-live="polite">
+          <div className="tally-card">
+            <div className="tally-spinner" />
+            <p>Tallying System Banks with the application.</p>
+          </div>
+        </div>
       )}
     </div>
     <div className="page-controls">

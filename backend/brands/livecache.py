@@ -195,6 +195,15 @@ def same(key: str, digest: str) -> bool:
         return False
 
 
+def forget(key: str) -> None:
+    if time.monotonic() < _down_until:
+        return
+    try:
+        _redis().delete(key)
+    except redis.RedisError:
+        _mark_down()
+
+
 def store(key: str, digest: str) -> None:
     if time.monotonic() < _down_until:
         return

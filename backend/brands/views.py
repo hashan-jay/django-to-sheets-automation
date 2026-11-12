@@ -20,6 +20,7 @@ from brands.services import (
     list_bank_transfers,
     load_dashboard,
     sync_day,
+    tally_system_banks,
     transaction_record,
     update_bank_ledger,
 )
@@ -56,6 +57,19 @@ class GoogleSheetSyncView(APIView):
             return Response({"detail": str(exc)}, status=400)
         except Exception as exc:
             message = str(exc).splitlines()[0][:500] or "The Google Sheet could not be updated."
+            return Response({"detail": message}, status=502)
+        return Response(result)
+
+
+class TallySystemBanksView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        day = _parse_day(request.data.get("date"))
+        try:
+            result = tally_system_banks(day)
+        except Exception as exc:
+            message = str(exc).splitlines()[0][:500] or "The system banks could not be tallied."
             return Response({"detail": message}, status=502)
         return Response(result)
 

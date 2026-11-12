@@ -504,12 +504,12 @@ _company_bank_lock = threading.Lock()
 _company_bank_cache: dict[int, tuple[float, list[tuple[str, str, str, str]]]] = {}
 
 
-def _company_banks(brand: Brand) -> list[tuple[str, str, str, str]]:
+def _company_banks(brand: Brand, *, refresh: bool = False) -> list[tuple[str, str, str, str]]:
     """(id, code, account name, status) from /banks/getBank, refreshed throughout the day."""
     now = time.monotonic()
     with _company_bank_lock:
         cached = _company_bank_cache.get(brand.pk)
-        if cached and now - cached[0] < _BANK_STATUS_TTL:
+        if not refresh and cached and now - cached[0] < _BANK_STATUS_TTL:
             return cached[1]
     try:
         loaded = _fetch_company_banks(brand)
@@ -521,7 +521,77 @@ def _company_banks(brand: Brand) -> list[tuple[str, str, str, str]]:
         raise
     with _company_bank_lock:
         _company_bank_cache[brand.pk] = (time.monotonic(), loaded)
+    if refresh:
+        with _bank_status_lock:
+            _bank_status_cache.pop(brand.pk, None)
     return loaded
+
+
+def tally_system_banks(day: date) -> dict:
+    """Reload each brand's bank list and apply the current names to that day's completed rows."""
+    brands = list(Brand.objects.filter(is_active=True))
+    updated = 0
+    errors: list[str] = []
+    for brand in brands:
+        try:
+            banks = _company_banks(brand, refresh=True)
+        except (requests.RequestException, ValueError, TypeError) as exc:
+            errors.append(f"{brand.name}: {str(exc).splitlines()[0][:160]}")
+            continue
+        _save_company_banks(
+            {
+                bank_id: (code, account)
+                for bank_id, code, account, _status in banks
+                if bank_id and code and account
+            }
+        )
+        active = [item for item in banks if item[3] == "ACTIVE" and item[1] and item[2]]
+        rows = list(
+            Transaction.objects.filter(
+                brand=brand,
+                txn_date=day,
+                status="COMPLETED",
+                type__in=["DEPOSIT", "WITHDRAW"],
+            ).only("id", "bank_name", "bank_account_name")
+        )
+        changed = []
+        for txn in rows:
+            code, account = _tally_stored_bank(txn.bank_name, banks, active)
+            if not account or (txn.bank_name == code and txn.bank_account_name == account):
+                continue
+            txn.bank_name = code
+            txn.bank_account_name = account
+            changed.append(txn)
+        if changed:
+            Transaction.objects.bulk_update(changed, ["bank_name", "bank_account_name"])
+            updated += len(changed)
+        livecache.forget(f"brands:sig:{brand.pk}:{day.isoformat()}")
+    publish_snapshot(day)
+    detail = (
+        f"Tallied {updated} completed deposits and withdrawals with the current system banks."
+    )
+    if errors:
+        detail = f"{detail} {' '.join(errors)}"
+    return {"ok": not errors, "updated": updated, "detail": detail}
+
+
+def _tally_stored_bank(
+    current_code: str,
+    banks: list[tuple[str, str, str, str]],
+    active: list[tuple[str, str, str, str]],
+) -> tuple[str, str]:
+    if len(active) == 1:
+        return active[0][1], active[0][2]
+    code = str(current_code or "").strip()
+    if not code:
+        return "", ""
+    matched = [item for item in active if item[1].casefold() == code.casefold()]
+    if len(matched) == 1:
+        return matched[0][1], matched[0][2]
+    named = [item for item in banks if item[1].casefold() == code.casefold() and item[2]]
+    if len(named) == 1:
+        return named[0][1], named[0][2]
+    return "", ""
 
 
 def _fetch_company_banks(brand: Brand) -> list[tuple[str, str, str, str]]:
