@@ -84,6 +84,7 @@ export default function Dashboard() {
   const [type, setType] = useState("All types");
   const [status, setStatus] = useState("All statuses");
   const [sortBy, setSortBy] = useState("Sort by Time");
+  const [query, setQuery] = useState("");
   const [focus, setFocus] = useState("");
   const [live, setLive] = useState(true);
   const [data, setData] = useState(null);
@@ -260,9 +261,9 @@ export default function Dashboard() {
       .slice(0, 5);
   }, [data, previewKey]);
   const rows = useMemo(() => {
-    const source = (data?.rows || []).filter((row) => (focus ? matchesWidget(row, focus) : passesDropdown(row, status, type)));
+    const source = (data?.rows || []).filter((row) => (focus ? matchesWidget(row, focus) : passesDropdown(row, status, type)) && matchesQuery(row, query));
     return sortRows(source, sortBy);
-  }, [data, sortBy, focus, status, type]);
+  }, [data, sortBy, focus, status, type, query]);
   if (data?.stats && data.stats.row_count == null) revision.current = "";
   const widgets = stats.other?.count ? [...WIDGETS, ["other", "Other", "other", "OTHER", "All types"]] : WIDGETS;
   const focusTitle = widgetTitle(focus, widgets);
@@ -411,6 +412,19 @@ export default function Dashboard() {
         <div className="toolbar">
           <h2>{focusTitle ? focusTitle : "Transactions"}</h2>
           <div className="filters">
+            <label className="txn-search">
+              Search
+              <input
+                type="search"
+                value={query}
+                placeholder="ID, username, or name"
+                aria-label="Search by ID, username, or name"
+                onChange={(event) => {
+                  setQuery(event.target.value);
+                  if (tableScroll.current) tableScroll.current.scrollTop = 0;
+                }}
+              />
+            </label>
             <label>
               Sort by
               <select value={sortBy} onChange={(event) => setSortBy(event.target.value)}>
@@ -1565,6 +1579,12 @@ function compareText(left, right) {
 function widgetTitle(key, widgets) {
   if (key === "net_completed") return "Net completed";
   return widgets.find((item) => item[0] === key)?.[1] || "";
+}
+
+function matchesQuery(row, query) {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return true;
+  return [row.id, row.username, row.name].some((value) => String(value || "").toLowerCase().includes(needle));
 }
 
 function passesDropdown(row, status, type) {

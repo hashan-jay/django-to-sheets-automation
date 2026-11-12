@@ -951,6 +951,10 @@ label {
 
 .filters label { font-size: 13px; }
 
+.filters label.txn-search input {
+  width: 220px;
+}
+
 input, select {
   border: 1px solid #dbe3ec;
   border-radius: 10px;
