@@ -24,6 +24,7 @@ _SHEET_URL_RE = re.compile(r"/spreadsheets/d/([a-zA-Z0-9-_]+)")
 _GID_RE = re.compile(r"[?#&]gid=(\d+)")
 _lock = threading.Lock()
 _wake = threading.Event()
+_gateway_patch = threading.Event()
 _writer_started = False
 _writer_guard = threading.Lock()
 
@@ -189,6 +190,12 @@ def request_export() -> None:
     _wake.set()
 
 
+def request_gateway_bank_patch() -> None:
+    """Write AtasPay and AmoPay into the Bank column of rows already on the sheet."""
+    _gateway_patch.set()
+    _wake.set()
+
+
 def start_writer() -> None:
     """Keep writing completed rows for as long as this process is running."""
     global _writer_started
@@ -198,6 +205,7 @@ def start_writer() -> None:
         _writer_started = True
     thread = threading.Thread(target=_writer_loop, name="sheet-writer", daemon=True)
     thread.start()
+    request_gateway_bank_patch()
 
 
 def _writer_loop() -> None:
@@ -213,6 +221,9 @@ def _writer_loop() -> None:
                     continue
                 if count == 0:
                     break
+            if _gateway_patch.is_set():
+                _gateway_patch.clear()
+                patch_gateway_banks()
         except Exception:
             log.exception("Google Sheet export failed")
         finally:
@@ -499,8 +510,77 @@ def _when(item: Transaction) -> str:
     return aware.strftime("%d/%m/%Y %H:%M")
 
 
+def patch_gateway_banks() -> int:
+    """Put the payment method in column C for AtasPay and AmoPay rows. Other rows are not changed."""
+    from brands.models import is_gateway_method
+
+    if not _lock.acquire(blocking=False):
+        _gateway_patch.set()
+        return -1
+    try:
+        row = sheet_setting()
+        sheet_id = normalize_google_sheet_id(row.sheet_url)
+        if not sheet_id:
+            return 0
+        items = [
+            item
+            for item in Transaction.objects.filter(
+                status="COMPLETED",
+                type__in=["DEPOSIT", "WITHDRAW"],
+            )
+            .exclude(method="")
+            .only("external_id", "method", "txn_date")
+            if is_gateway_method(item.method)
+        ]
+        if not items:
+            return 0
+        spreadsheet = _open_spreadsheet(sheet_id)
+        tabs = {str(worksheet.title).strip(): worksheet for worksheet in spreadsheet.worksheets()}
+        grouped: dict[str, list[Transaction]] = {}
+        for item in items:
+            grouped.setdefault(_tab_name(item), []).append(item)
+        updated = 0
+        for title, group in grouped.items():
+            worksheet = tabs.get(title)
+            if worksheet is None:
+                continue
+            positions: dict[str, tuple[int, str]] = {}
+            for index, cells in enumerate(worksheet.get("C:G"), start=1):
+                txn_id = str(cells[4]).strip() if len(cells) > 4 else ""
+                if not txn_id or txn_id in positions:
+                    continue
+                current = str(cells[0]).strip() if cells else ""
+                positions[txn_id] = (index, current)
+            ranges = []
+            for item in group:
+                found = positions.get(item.external_id)
+                if found is None:
+                    continue
+                slot, current = found
+                method = item.method.strip()
+                if not method or current == method:
+                    continue
+                ranges.append({"range": f"C{slot}", "values": [[method]]})
+            for offset in range(0, len(ranges), 200):
+                chunk = ranges[offset : offset + 200]
+                if chunk:
+                    worksheet.batch_update(chunk, value_input_option="USER_ENTERED")
+                    updated += len(chunk)
+        return updated
+    except Exception as exc:
+        message = str(exc).splitlines()[0][:500]
+        log.warning("Google Sheet payment-method update failed: %s", message)
+        return 0
+    finally:
+        _lock.release()
+
+
 def _sheet_bank(item: Transaction) -> str:
-    """Bank column is the bank name plus account name, or the payment method when there is no bank."""
+    """Bank column is the bank name plus account name, or the payment method for AtasPay and AmoPay."""
+    from brands.models import is_gateway_method
+
+    if is_gateway_method(item.method):
+        return (item.method or "").strip()
     bank = (item.bank_name or "").strip()
     account = (item.bank_account_name or "").strip()
     label = " ".join(part for part in (bank, account) if part)

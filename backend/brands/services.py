@@ -388,9 +388,11 @@ def _store_rows(brand: Brand, day: date, raw_rows: list[dict], catalog: dict[str
         item.status == "COMPLETED" and item.type in {"DEPOSIT", "WITHDRAW"}
         for item in prepared
     ):
-        from brands.sheets import request_export
+        from brands.sheets import request_export, request_gateway_bank_patch
 
         request_export()
+        if any(is_gateway_method(item.method) for item in prepared):
+            request_gateway_bank_patch()
     return True
 
 
