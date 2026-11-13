@@ -800,6 +800,21 @@ def _dropdown_score(label: str, choice: str) -> int | None:
     return score
 
 
+def _gateway_dropdown(label: str, choices: list[str]) -> str:
+    """AmoPayRamp uses the AMOPAY dropdown entry. AtasPay uses the AtasPay entry."""
+    compact = _bank_key(label)
+    needle = "amopay" if "amopay" in compact else "ataspay" if "ataspay" in compact else ""
+    if not needle:
+        return ""
+    exact = [choice for choice in choices if _bank_key(choice) == needle]
+    if exact:
+        return exact[0]
+    contains = [choice for choice in choices if needle in _bank_key(choice)]
+    if not contains:
+        return ""
+    return min(contains, key=lambda choice: len(_bank_key(choice)))
+
+
 def _match_bank(label: str, choices: list[str]) -> str:
     """Return the dropdown entry for this bank. The cell is then that list value, not a free-typed name.
 
@@ -808,6 +823,9 @@ def _match_bank(label: str, choices: list[str]) -> str:
     text = str(label or "").strip()
     if not text or not choices:
         return text
+    gateway = _gateway_dropdown(text, choices)
+    if gateway:
+        return gateway
     best_choice = ""
     best_score = None
     for choice in choices:
