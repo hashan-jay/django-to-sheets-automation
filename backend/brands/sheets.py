@@ -115,8 +115,9 @@ def save_sheet_url(raw: str, slot_raw=1) -> GoogleSheetSetting:
     if clean and gid is not None:
         clean = f"{clean}/edit?gid={gid}"
     row.sheet_url = clean
+    row.sheet_name = _spreadsheet_title(sheet_id) if sheet_id else ""
     row.last_error = ""
-    row.save(update_fields=["sheet_url", "last_error", "updated_at"])
+    row.save(update_fields=["sheet_url", "sheet_name", "last_error", "updated_at"])
     return row
 
 
@@ -161,6 +162,7 @@ def _sheet_public(row: GoogleSheetSetting) -> dict:
     return {
         "slot": row.slot,
         "label": sheet_label(row.slot),
+        "sheet_name": row.sheet_name,
         "sheet_url": row.sheet_url,
         "blocked": bool(row.blocked),
         "sheet_id": normalize_google_sheet_id(row.sheet_url),
@@ -169,8 +171,29 @@ def _sheet_public(row: GoogleSheetSetting) -> dict:
     }
 
 
+def _spreadsheet_title(sheet_id: str) -> str:
+    if not sheet_id:
+        return ""
+    try:
+        return str(_open_spreadsheet(sheet_id).title or "").strip()[:200]
+    except Exception as exc:
+        log.warning("Google Sheet title lookup failed: %s", str(exc).splitlines()[0][:300])
+        return ""
+
+
+def _fill_missing_sheet_names() -> None:
+    for row in GoogleSheetSetting.objects.filter(slot__in=SHEET_SLOTS):
+        if row.sheet_name or not normalize_google_sheet_id(row.sheet_url):
+            continue
+        title = _spreadsheet_title(normalize_google_sheet_id(row.sheet_url))
+        if not title:
+            continue
+        GoogleSheetSetting.objects.filter(pk=row.pk, sheet_name="").update(sheet_name=title)
+
+
 def public_status() -> dict:
     ensure_sheet_slots()
+    _fill_missing_sheet_names()
     row = sheet_setting(1)
     sheets = [_sheet_public(item) for item in GoogleSheetSetting.objects.filter(slot__in=SHEET_SLOTS).order_by("slot")]
     return {

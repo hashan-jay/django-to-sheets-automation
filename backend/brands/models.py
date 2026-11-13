@@ -250,6 +250,7 @@ class GoogleSheetSetting(models.Model):
 
     slot = models.PositiveSmallIntegerField(default=1, unique=True)
     sheet_url = models.URLField(max_length=500, blank=True)
+    sheet_name = models.CharField(max_length=200, blank=True, default="")
     blocked = models.BooleanField(default=False)
     deposit_start_row = models.PositiveIntegerField(default=105)
     withdraw_start_row = models.PositiveIntegerField(default=1024)

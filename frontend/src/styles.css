@@ -107,6 +107,11 @@ button {
   color: var(--muted);
 }
 
+.sheet-heading {
+  color: #0a1628;
+  font-weight: 750;
+}
+
 .sheet-url label {
   font-size: 12px;
   font-weight: 700;

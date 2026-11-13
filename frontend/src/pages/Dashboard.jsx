@@ -60,7 +60,7 @@ const WIDGETS = [
 ];
 
 function emptySheets() {
-  return [1, 2, 3].map((slot) => ({ slot, sheet_url: "", blocked: false }));
+  return [1, 2, 3].map((slot) => ({ slot, sheet_url: "", sheet_name: "", blocked: false }));
 }
 
 function sheetsFromStatus(sheet) {
@@ -68,9 +68,16 @@ function sheetsFromStatus(sheet) {
   return emptySheets().map((blank) => {
     const found = incoming.find((item) => Number(item.slot) === blank.slot);
     if (found) {
-      return { slot: blank.slot, sheet_url: found.sheet_url || "", blocked: Boolean(found.blocked) };
+      return {
+        slot: blank.slot,
+        sheet_url: found.sheet_url || "",
+        sheet_name: found.sheet_name || "",
+        blocked: Boolean(found.blocked),
+      };
     }
-    if (blank.slot === 1) return { slot: 1, sheet_url: sheet?.sheet_url || "", blocked: Boolean(sheet?.blocked) };
+    if (blank.slot === 1) {
+      return { slot: 1, sheet_url: sheet?.sheet_url || "", sheet_name: sheet?.sheet_name || "", blocked: Boolean(sheet?.blocked) };
+    }
     return blank;
   });
 }
@@ -202,7 +209,7 @@ export default function Dashboard() {
   }
 
   function updateSheetUrl(slot, value) {
-    setSheets((current) => current.map((item) => (item.slot === slot ? { ...item, sheet_url: value } : item)));
+    setSheets((current) => current.map((item) => (item.slot === slot ? { ...item, sheet_url: value, sheet_name: value.trim() === item.sheet_url.trim() ? item.sheet_name : "" } : item)));
   }
 
   async function saveSheet(event, slot) {
@@ -372,7 +379,11 @@ export default function Dashboard() {
             onSubmit={(event) => saveSheet(event, sheet.slot)}
           >
             <div className="writer-label">
-              <label htmlFor={`sheet-url-${sheet.slot}`}>Google Sheet {sheet.slot}</label>
+              <label htmlFor={`sheet-url-${sheet.slot}`}>
+                {sheet.sheet_name ? <strong className="sheet-heading">{sheet.sheet_name}</strong> : null}
+                {sheet.sheet_name ? " · " : ""}
+                Google Sheet {sheet.slot}
+              </label>
               <span>{sheet.blocked ? "Writing paused" : "Day tab · Staff stays untouched"}</span>
             </div>
             <div className="sheet-url-row">
