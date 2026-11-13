@@ -60,27 +60,77 @@ def google_sheet_url(sheet_id: object) -> str:
     return f"https://docs.google.com/spreadsheets/d/{key}" if key else ""
 
 
-def sheet_setting() -> GoogleSheetSetting:
-    row, _created = GoogleSheetSetting.objects.get_or_create(
-        pk=1,
-        defaults={"sheet_url": DEFAULT_SHEET_URL},
-    )
+SHEET_SLOTS = (1, 2, 3)
+
+
+def sheet_label(slot: int) -> str:
+    return f"Google Sheet {slot}"
+
+
+def _slot_number(raw) -> int:
+    try:
+        slot = int(raw)
+    except (TypeError, ValueError):
+        slot = 0
+    if slot not in SHEET_SLOTS:
+        raise ValueError("Choose Google Sheet 1, Google Sheet 2, or Google Sheet 3.")
+    return slot
+
+
+def ensure_sheet_slots() -> None:
+    sheet_setting(1)
+    for slot in (2, 3):
+        GoogleSheetSetting.objects.get_or_create(slot=slot, defaults={"sheet_url": "", "blocked": False})
+
+
+def sheet_setting(slot: int = 1) -> GoogleSheetSetting:
+    slot = _slot_number(slot)
+    defaults = {"sheet_url": DEFAULT_SHEET_URL if slot == 1 else "", "blocked": False}
+    row, _created = GoogleSheetSetting.objects.get_or_create(slot=slot, defaults=defaults)
     return row
 
 
-def save_sheet_url(raw: str) -> GoogleSheetSetting:
+def active_sheet_settings() -> list[GoogleSheetSetting]:
+    """Sheets that should receive live writes: a saved link, and not blocked."""
+    ensure_sheet_slots()
+    rows = []
+    for row in GoogleSheetSetting.objects.filter(slot__in=SHEET_SLOTS).order_by("slot"):
+        if row.blocked or not normalize_google_sheet_id(row.sheet_url):
+            continue
+        rows.append(row)
+    return rows
+
+
+def save_sheet_url(raw: str, slot_raw=1) -> GoogleSheetSetting:
+    slot = _slot_number(slot_raw)
     text = str(raw or "").strip()
     sheet_id = normalize_google_sheet_id(text)
     if text and not sheet_id:
         raise ValueError("Paste a Google Sheets link, or clear the field to stop writing.")
+    row = sheet_setting(slot)
+    if row.blocked:
+        raise ValueError(f"Unblock {sheet_label(slot)} before changing its link.")
     gid = worksheet_gid(text)
     clean = google_sheet_url(sheet_id)
     if clean and gid is not None:
         clean = f"{clean}/edit?gid={gid}"
-    row = sheet_setting()
     row.sheet_url = clean
     row.last_error = ""
     row.save(update_fields=["sheet_url", "last_error", "updated_at"])
+    return row
+
+
+def set_sheet_blocked(slot_raw, blocked_raw) -> GoogleSheetSetting:
+    slot = _slot_number(slot_raw)
+    blocked = blocked_raw is True or str(blocked_raw).strip().lower() in {"1", "true", "yes", "on"}
+    row = sheet_setting(slot)
+    if blocked and not normalize_google_sheet_id(row.sheet_url):
+        raise ValueError(f"Save a link for {sheet_label(slot)} before blocking it.")
+    row.blocked = blocked
+    row.last_error = ""
+    row.save(update_fields=["blocked", "last_error", "updated_at"])
+    if not blocked:
+        request_export()
     return row
 
 
@@ -107,34 +157,52 @@ def save_start_rows(deposit_raw, withdraw_raw) -> GoogleSheetSetting:
     return row
 
 
+def _sheet_public(row: GoogleSheetSetting) -> dict:
+    return {
+        "slot": row.slot,
+        "label": sheet_label(row.slot),
+        "sheet_url": row.sheet_url,
+        "blocked": bool(row.blocked),
+        "sheet_id": normalize_google_sheet_id(row.sheet_url),
+        "last_error": row.last_error,
+        "last_written_at": row.last_written_at.isoformat() if row.last_written_at else "",
+    }
+
+
 def public_status() -> dict:
-    row = sheet_setting()
+    ensure_sheet_slots()
+    row = sheet_setting(1)
+    sheets = [_sheet_public(item) for item in GoogleSheetSetting.objects.filter(slot__in=SHEET_SLOTS).order_by("slot")]
     return {
         "sheet_url": row.sheet_url,
+        "blocked": bool(row.blocked),
         "deposit_start_row": row.deposit_start_row or DEFAULT_DEPOSIT_START,
         "withdraw_start_row": row.withdraw_start_row or DEFAULT_WITHDRAW_START,
         "sheet_id": normalize_google_sheet_id(row.sheet_url),
         "last_error": row.last_error,
         "last_written_at": row.last_written_at.isoformat() if row.last_written_at else "",
         "written_count": SheetExport.objects.count(),
+        "sheets": sheets,
     }
 
 
-def sync_brands_for_day(day) -> dict:
+def sync_brands_for_day(day, slot_raw=1) -> dict:
     """Write every deposit and withdrawal for the day, then compare counts with the sheet."""
+    slot = _slot_number(slot_raw)
     if not _lock.acquire(timeout=180):
         raise ValueError("A Google Sheet sync is already running.")
     try:
-        return _sync_brands_for_day(day)
+        return _sync_brands_for_day(day, slot)
     finally:
         _lock.release()
 
 
-def _sync_brands_for_day(day) -> dict:
-    row = sheet_setting()
+def _sync_brands_for_day(day, slot: int) -> dict:
+    shared = sheet_setting(1)
+    row = sheet_setting(slot)
     sheet_id = normalize_google_sheet_id(row.sheet_url)
     if not sheet_id:
-        raise ValueError("Save a Google Sheet link first.")
+        raise ValueError(f"Save a link for {sheet_label(slot)} first.")
     pending = list(
         Transaction.objects.filter(
             txn_date=day,
@@ -148,13 +216,14 @@ def _sync_brands_for_day(day) -> dict:
     spreadsheet = _open_spreadsheet(sheet_id)
     title = str(day.day)
     worksheet = next((item for item in spreadsheet.worksheets() if str(item.title).strip() == title), None)
-    removed = _remove_uncompleted(worksheet, day) if worksheet is not None else 0
+    removed = _remove_uncompleted(worksheet, day, slot) if worksheet is not None else 0
     _write_payment_methods(spreadsheet, day)
     written, errors = _write_cashbook(
         spreadsheet,
         pending,
-        row.deposit_start_row or DEFAULT_DEPOSIT_START,
-        row.withdraw_start_row or DEFAULT_WITHDRAW_START,
+        shared.deposit_start_row or DEFAULT_DEPOSIT_START,
+        shared.withdraw_start_row or DEFAULT_WITHDRAW_START,
+        slot,
     )
     if worksheet is not None:
         worksheet = next((item for item in spreadsheet.worksheets() if str(item.title).strip() == title), None)
@@ -166,7 +235,7 @@ def _sync_brands_for_day(day) -> dict:
     withdraws = database_count - deposits
     detail = (
         f"Completed only: {deposits} deposits and {withdraws} withdrawals in the database. "
-        f"The Google Sheet has {sheet_count} of those ids, each id once."
+        f"{sheet_label(slot)} has {sheet_count} of those ids, each id once."
     )
     if removed:
         detail += f" Removed {removed} rows that were not completed."
@@ -245,36 +314,36 @@ def export_pending(limit: int = 200) -> int:
 
 
 def _export_pending(limit: int) -> int:
-    row = sheet_setting()
-    sheet_id = normalize_google_sheet_id(row.sheet_url)
-    if not sheet_id:
+    sheets = active_sheet_settings()
+    if not sheets:
         return 0
-    pending = list(
-        Transaction.objects.filter(status="COMPLETED", type__in=["DEPOSIT", "WITHDRAW"])
-        .exclude(sheet_export__isnull=False)
-        .select_related("brand")
-        .order_by("txn_date", "created_at", "id")[:limit]
-    )
-    if not pending:
-        return 0
-    try:
-        spreadsheet = _open_spreadsheet(sheet_id)
-        written, errors = _write_cashbook(
-            spreadsheet,
-            pending,
-            row.deposit_start_row or DEFAULT_DEPOSIT_START,
-            row.withdraw_start_row or DEFAULT_WITHDRAW_START,
+    shared = sheet_setting(1)
+    deposit_start = shared.deposit_start_row or DEFAULT_DEPOSIT_START
+    withdraw_start = shared.withdraw_start_row or DEFAULT_WITHDRAW_START
+    written_total = 0
+    for row in sheets:
+        pending = list(
+            Transaction.objects.filter(status="COMPLETED", type__in=["DEPOSIT", "WITHDRAW"])
+            .exclude(sheet_exports__slot=row.slot)
+            .select_related("brand")
+            .order_by("txn_date", "created_at", "id")[:limit]
         )
-    except Exception as exc:
-        message = str(exc).splitlines()[0][:500]
-        log.warning("Google Sheet write failed: %s", message)
-        GoogleSheetSetting.objects.filter(pk=row.pk).update(last_error=message)
-        return 0
-    GoogleSheetSetting.objects.filter(pk=row.pk).update(
-        last_error=" ".join(errors)[:500],
-        last_written_at=timezone.now() if written else row.last_written_at,
-    )
-    return len(written)
+        if not pending:
+            continue
+        try:
+            spreadsheet = _open_spreadsheet(normalize_google_sheet_id(row.sheet_url))
+            written, errors = _write_cashbook(spreadsheet, pending, deposit_start, withdraw_start, row.slot)
+        except Exception as exc:
+            message = str(exc).splitlines()[0][:500]
+            log.warning("%s write failed: %s", sheet_label(row.slot), message)
+            GoogleSheetSetting.objects.filter(pk=row.pk).update(last_error=message)
+            continue
+        GoogleSheetSetting.objects.filter(pk=row.pk).update(
+            last_error=" ".join(errors)[:500],
+            last_written_at=timezone.now() if written else row.last_written_at,
+        )
+        written_total += len(written)
+    return written_total
 
 
 def _open_spreadsheet(sheet_id: str):
@@ -291,6 +360,7 @@ def _write_cashbook(
     pending: list[Transaction],
     deposit_start: int = DEFAULT_DEPOSIT_START,
     withdraw_start: int = DEFAULT_WITHDRAW_START,
+    slot: int = 1,
 ) -> tuple[list[Transaction], list[str]]:
     """Finance cashbook: tab name is the transaction date's day number.
 
@@ -325,7 +395,7 @@ def _write_cashbook(
                 unique_items.append(item)
             already = [item for item in unique_items if item.external_id in existing]
             fresh = [item for item in unique_items if item.external_id not in existing]
-            _remember(already)
+            _remember(already, slot)
             deposits = [item for item in fresh if item.type != "WITHDRAW"]
             withdraws = [item for item in fresh if item.type == "WITHDRAW"]
             placed = _write_block(worksheet, ids, deposits, deposit_start, deposit_end)
@@ -334,7 +404,7 @@ def _write_cashbook(
                 worksheet.add_rows(needed_rows - worksheet.row_count)
             withdraw_end = max(worksheet.row_count, needed_rows)
             placed += _write_block(worksheet, ids, withdraws, withdraw_start, withdraw_end)
-            _remember(placed)
+            _remember(placed, slot)
             written.extend(already)
             written.extend(placed)
             left = len(fresh) - len(placed)
@@ -346,7 +416,7 @@ def _write_cashbook(
     return written, errors
 
 
-def _remove_uncompleted(worksheet, day) -> int:
+def _remove_uncompleted(worksheet, day, slot: int) -> int:
     """Clear cashbook rows whose transaction is a deposit or withdrawal that is not completed."""
     unwanted = set(
         Transaction.objects.filter(txn_date=day, type__in=["DEPOSIT", "WITHDRAW"])
@@ -368,7 +438,11 @@ def _remove_uncompleted(worksheet, day) -> int:
         if chunk:
             worksheet.batch_update(chunk, value_input_option="USER_ENTERED")
     if cleared:
-        SheetExport.objects.filter(transaction__external_id__in=cleared, transaction__txn_date=day).delete()
+        SheetExport.objects.filter(
+            slot=slot,
+            transaction__external_id__in=cleared,
+            transaction__txn_date=day,
+        ).delete()
     return len(cleared)
 
 
@@ -439,10 +513,10 @@ def _clear_duplicate_ids(worksheet, id_column: list[str]) -> None:
             worksheet.batch_update(chunk, value_input_option="USER_ENTERED")
 
 
-def _remember(items: list[Transaction]) -> None:
+def _remember(items: list[Transaction], slot: int = 1) -> None:
     if items:
         SheetExport.objects.bulk_create(
-            [SheetExport(transaction=item) for item in items],
+            [SheetExport(transaction=item, slot=slot) for item in items],
             ignore_conflicts=True,
         )
 
@@ -518,9 +592,8 @@ def patch_gateway_banks() -> int:
         _gateway_patch.set()
         return -1
     try:
-        row = sheet_setting()
-        sheet_id = normalize_google_sheet_id(row.sheet_url)
-        if not sheet_id:
+        sheets = active_sheet_settings()
+        if not sheets:
             return 0
         items = [
             item
@@ -534,38 +607,14 @@ def patch_gateway_banks() -> int:
         ]
         if not items:
             return 0
-        spreadsheet = _open_spreadsheet(sheet_id)
-        tabs = {str(worksheet.title).strip(): worksheet for worksheet in spreadsheet.worksheets()}
-        grouped: dict[str, list[Transaction]] = {}
-        for item in items:
-            grouped.setdefault(_tab_name(item), []).append(item)
         updated = 0
-        for title, group in grouped.items():
-            worksheet = tabs.get(title)
-            if worksheet is None:
-                continue
-            positions: dict[str, tuple[int, str]] = {}
-            for index, cells in enumerate(worksheet.get("C:G"), start=1):
-                txn_id = str(cells[4]).strip() if len(cells) > 4 else ""
-                if not txn_id or txn_id in positions:
-                    continue
-                current = str(cells[0]).strip() if cells else ""
-                positions[txn_id] = (index, current)
-            ranges = []
-            for item in group:
-                found = positions.get(item.external_id)
-                if found is None:
-                    continue
-                slot, current = found
-                method = item.method.strip()
-                if not method or current == method:
-                    continue
-                ranges.append({"range": f"C{slot}", "values": [[method]]})
-            for offset in range(0, len(ranges), 200):
-                chunk = ranges[offset : offset + 200]
-                if chunk:
-                    worksheet.batch_update(chunk, value_input_option="USER_ENTERED")
-                    updated += len(chunk)
+        for row in sheets:
+            spreadsheet = _open_spreadsheet(normalize_google_sheet_id(row.sheet_url))
+            tabs = {str(worksheet.title).strip(): worksheet for worksheet in spreadsheet.worksheets()}
+            grouped: dict[str, list[Transaction]] = {}
+            for item in items:
+                grouped.setdefault(_tab_name(item), []).append(item)
+            updated += _patch_gateway_tabs(tabs, grouped)
         return updated
     except Exception as exc:
         message = str(exc).splitlines()[0][:500]
@@ -573,6 +622,37 @@ def patch_gateway_banks() -> int:
         return 0
     finally:
         _lock.release()
+
+
+def _patch_gateway_tabs(tabs, grouped: dict[str, list[Transaction]]) -> int:
+    updated = 0
+    for title, group in grouped.items():
+        worksheet = tabs.get(title)
+        if worksheet is None:
+            continue
+        positions: dict[str, tuple[int, str]] = {}
+        for index, cells in enumerate(worksheet.get("C:G"), start=1):
+            txn_id = str(cells[4]).strip() if len(cells) > 4 else ""
+            if not txn_id or txn_id in positions:
+                continue
+            current = str(cells[0]).strip() if cells else ""
+            positions[txn_id] = (index, current)
+        ranges = []
+        for item in group:
+            found = positions.get(item.external_id)
+            if found is None:
+                continue
+            row_number, current = found
+            method = item.method.strip()
+            if not method or current == method:
+                continue
+            ranges.append({"range": f"C{row_number}", "values": [[method]]})
+        for offset in range(0, len(ranges), 200):
+            chunk = ranges[offset : offset + 200]
+            if chunk:
+                worksheet.batch_update(chunk, value_input_option="USER_ENTERED")
+                updated += len(chunk)
+    return updated
 
 
 def _sheet_bank(item: Transaction) -> str:
@@ -610,42 +690,46 @@ def _cashbook_cells(item: Transaction) -> list[str]:
 
 def repair_written_columns() -> int:
     """Correct Bank and Description on rows this app already wrote. Staff is not touched."""
-    row = sheet_setting()
-    sheet_id = normalize_google_sheet_id(row.sheet_url)
-    if not sheet_id:
+    sheets = active_sheet_settings()
+    if not sheets:
         return 0
-    exported = list(
-        SheetExport.objects.select_related("transaction", "transaction__brand").order_by("transaction__txn_date", "id")
-    )
-    if not exported:
-        return 0
-    spreadsheet = _open_spreadsheet(sheet_id)
-    tabs = {str(worksheet.title).strip(): worksheet for worksheet in spreadsheet.worksheets()}
-    grouped: dict[str, list[Transaction]] = {}
-    for mark in exported:
-        grouped.setdefault(_tab_name(mark.transaction), []).append(mark.transaction)
     updated = 0
-    for title, items in grouped.items():
-        worksheet = tabs.get(title)
-        if worksheet is None:
+    for row in sheets:
+        exported = list(
+            SheetExport.objects.filter(slot=row.slot)
+            .select_related("transaction", "transaction__brand")
+            .order_by("transaction__txn_date", "id")
+        )
+        if not exported:
             continue
-        ids = worksheet.col_values(7)
-        positions = {}
-        for index, value in enumerate(ids, start=1):
-            key = str(value).strip()
-            if key and key not in positions:
-                positions[key] = index
-        ranges = []
-        for item in items:
-            slot = positions.get(item.external_id)
-            if slot is None:
+        spreadsheet = _open_spreadsheet(normalize_google_sheet_id(row.sheet_url))
+        tabs = {str(worksheet.title).strip(): worksheet for worksheet in spreadsheet.worksheets()}
+        grouped: dict[str, list[Transaction]] = {}
+        for mark in exported:
+            grouped.setdefault(_tab_name(mark.transaction), []).append(mark.transaction)
+        for title, items in grouped.items():
+            worksheet = tabs.get(title)
+            if worksheet is None:
                 continue
-            ranges.append({"range": f"C{slot}:D{slot}", "values": [[_sheet_bank(item), (item.player_name or "").strip()]]})
-        for offset in range(0, len(ranges), 200):
-            chunk = ranges[offset : offset + 200]
-            if chunk:
-                worksheet.batch_update(chunk, value_input_option="USER_ENTERED")
-                updated += len(chunk)
+            ids = worksheet.col_values(7)
+            positions = {}
+            for index, value in enumerate(ids, start=1):
+                key = str(value).strip()
+                if key and key not in positions:
+                    positions[key] = index
+            ranges = []
+            for item in items:
+                row_number = positions.get(item.external_id)
+                if row_number is None:
+                    continue
+                ranges.append(
+                    {"range": f"C{row_number}:D{row_number}", "values": [[_sheet_bank(item), (item.player_name or "").strip()]]}
+                )
+            for offset in range(0, len(ranges), 200):
+                chunk = ranges[offset : offset + 200]
+                if chunk:
+                    worksheet.batch_update(chunk, value_input_option="USER_ENTERED")
+                    updated += len(chunk)
     return updated
 
 

@@ -59,6 +59,22 @@ const WIDGETS = [
   ["rejected", "Rejected", "rejected", "REJECTED", "All types"],
 ];
 
+function emptySheets() {
+  return [1, 2, 3].map((slot) => ({ slot, sheet_url: "", blocked: false }));
+}
+
+function sheetsFromStatus(sheet) {
+  const incoming = Array.isArray(sheet?.sheets) ? sheet.sheets : [];
+  return emptySheets().map((blank) => {
+    const found = incoming.find((item) => Number(item.slot) === blank.slot);
+    if (found) {
+      return { slot: blank.slot, sheet_url: found.sheet_url || "", blocked: Boolean(found.blocked) };
+    }
+    if (blank.slot === 1) return { slot: 1, sheet_url: sheet?.sheet_url || "", blocked: Boolean(sheet?.blocked) };
+    return blank;
+  });
+}
+
 export function today() {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: "Australia/Sydney",
@@ -71,12 +87,14 @@ export function today() {
 export default function Dashboard() {
   const [brands, setBrands] = useState([]);
   const [group] = useState("All");
-  const [sheetUrl, setSheetUrl] = useState("");
+  const [sheets, setSheets] = useState(() => emptySheets());
   const [depositStart, setDepositStart] = useState("105");
   const [withdrawStart, setWithdrawStart] = useState("1024");
   const [sheetNote, setSheetNote] = useState("");
-  const [sheetBusy, setSheetBusy] = useState(false);
-  const [sheetSyncing, setSheetSyncing] = useState(false);
+  const [sheetNoteOk, setSheetNoteOk] = useState(false);
+  const [sheetBusy, setSheetBusy] = useState(0);
+  const [sheetSyncing, setSheetSyncing] = useState(0);
+  const [sheetBlocking, setSheetBlocking] = useState(0);
   const [rowsBusy, setRowsBusy] = useState(false);
   const [tallying, setTallying] = useState(false);
   const [brand, setBrand] = useState("All");
@@ -102,10 +120,11 @@ export default function Dashboard() {
       .catch((err) => setError(err.message));
     api("/api/google-sheet/")
       .then((sheet) => {
-        setSheetUrl(sheet.sheet_url || "");
+        setSheets(sheetsFromStatus(sheet));
         setDepositStart(String(sheet.deposit_start_row || 105));
         setWithdrawStart(String(sheet.withdraw_start_row || 1024));
         setSheetNote(sheet.last_error || "");
+        setSheetNoteOk(!sheet.last_error);
       })
       .catch(() => {});
   }, []);
@@ -114,6 +133,7 @@ export default function Dashboard() {
     event.preventDefault();
     setRowsBusy(true);
     setSheetNote("");
+    setSheetNoteOk(false);
     try {
       const saved = await api("/api/google-sheet/", {
         method: "POST",
@@ -122,54 +142,97 @@ export default function Dashboard() {
       setDepositStart(String(saved.deposit_start_row));
       setWithdrawStart(String(saved.withdraw_start_row));
       setSheetNote(`Saved. Deposits start at row ${saved.deposit_start_row}. Withdrawals start at row ${saved.withdraw_start_row}.`);
+      setSheetNoteOk(true);
     } catch (err) {
       setSheetNote(err.message);
+      setSheetNoteOk(false);
     } finally {
       setRowsBusy(false);
     }
   }
 
-  async function syncSheet() {
-    setSheetSyncing(true);
+  async function syncSheet(slot) {
+    setSheetSyncing(slot);
     setSheetNote("");
+    setSheetNoteOk(false);
     try {
-      const result = await api("/api/google-sheet/sync/", { method: "POST", body: { date } });
-      setSheetNote(result.detail || "Google Sheet sync finished.");
+      const result = await api("/api/google-sheet/sync/", { method: "POST", body: { date, slot } });
+      setSheetNote(result.detail || `Google Sheet ${slot} sync finished.`);
+      setSheetNoteOk(Boolean(result.ok));
     } catch (err) {
       setSheetNote(err.message);
+      setSheetNoteOk(false);
     } finally {
-      setSheetSyncing(false);
+      setSheetSyncing(0);
+    }
+  }
+
+  async function blockSheet(slot, blocked) {
+    setSheetBlocking(slot);
+    setSheetNote("");
+    setSheetNoteOk(false);
+    try {
+      const saved = await api("/api/google-sheet/block/", { method: "POST", body: { slot, blocked } });
+      setSheets(sheetsFromStatus(saved));
+      setSheetNote(blocked ? `Google Sheet ${slot} is blocked. Writing is paused.` : `Google Sheet ${slot} is unblocked. Writing is live again.`);
+      setSheetNoteOk(true);
+    } catch (err) {
+      setSheetNote(err.message);
+      setSheetNoteOk(false);
+    } finally {
+      setSheetBlocking(0);
     }
   }
 
   async function tallyBanks() {
     setTallying(true);
     setSheetNote("");
+    setSheetNoteOk(false);
     try {
       const result = await api("/api/banks/tally/", { method: "POST", body: { date } });
       setSheetNote(result.detail || "Tallied completed deposits and withdrawals with the current system banks.");
+      setSheetNoteOk(true);
       revision.current = "";
     } catch (err) {
       setSheetNote(err.message);
+      setSheetNoteOk(false);
     } finally {
       setTallying(false);
     }
   }
 
-  async function saveSheet(event) {
+  function updateSheetUrl(slot, value) {
+    setSheets((current) => current.map((item) => (item.slot === slot ? { ...item, sheet_url: value } : item)));
+  }
+
+  async function saveSheet(event, slot) {
     event.preventDefault();
-    setSheetBusy(true);
+    const current = sheets.find((item) => item.slot === slot);
+    setSheetBusy(slot);
     setSheetNote("");
+    setSheetNoteOk(false);
     try {
-      const saved = await api("/api/google-sheet/", { method: "POST", body: { sheet_url: sheetUrl.trim() } });
-      setSheetUrl(saved.sheet_url || "");
-      if (saved.last_error) setSheetNote(saved.last_error);
-      else if (saved.written_now) setSheetNote(`Wrote ${saved.written_now} rows.`);
-      else setSheetNote("Saved. Completed deposits and withdrawals for each date go on that day's numbered tab.");
+      const saved = await api("/api/google-sheet/", {
+        method: "POST",
+        body: { sheet_url: (current?.sheet_url || "").trim(), slot },
+      });
+      setSheets(sheetsFromStatus(saved));
+      const savedSheet = (saved.sheets || []).find((item) => item.slot === slot);
+      if (savedSheet?.last_error) {
+        setSheetNote(savedSheet.last_error);
+        setSheetNoteOk(false);
+      } else if (saved.written_now) {
+        setSheetNote(`Wrote ${saved.written_now} rows.`);
+        setSheetNoteOk(true);
+      } else {
+        setSheetNote(`Saved Google Sheet ${slot}. Completed deposits and withdrawals for each date go on that day's numbered tab.`);
+        setSheetNoteOk(true);
+      }
     } catch (err) {
       setSheetNote(err.message);
+      setSheetNoteOk(false);
     } finally {
-      setSheetBusy(false);
+      setSheetBusy(0);
     }
   }
 
@@ -299,28 +362,56 @@ export default function Dashboard() {
       <p className="command-scope">{formatDay(date)}</p>
     </div>
     <div className="writer">
-      <form className="sheet-url" onSubmit={saveSheet}>
-        <div className="writer-label">
-          <label htmlFor="sheet-url">Google Sheet</label>
-          <span>Day tab · Staff stays untouched</span>
-        </div>
-        <div className="sheet-url-row">
-          <input
-            id="sheet-url"
-            type="url"
-            inputMode="url"
-            spellCheck={false}
-            autoComplete="off"
-            value={sheetUrl}
-            placeholder="Paste the Google Sheet link"
-            onChange={(event) => setSheetUrl(event.target.value)}
-          />
-          {sheetUrl.trim() && (
-            <a className="sheet-open" href={sheetUrl.trim()} target="_blank" rel="noreferrer">Open</a>
-          )}
-          <button type="submit" disabled={sheetBusy || !sheetUrl.trim()}>{sheetBusy ? "Saving…" : "Save"}</button>
-        </div>
-      </form>
+      {sheets.map((sheet) => {
+        const link = sheet.sheet_url.trim();
+        const busyHere = sheetBusy === sheet.slot || sheetSyncing === sheet.slot || sheetBlocking === sheet.slot;
+        return (
+          <form
+            key={sheet.slot}
+            className={sheet.blocked ? "sheet-url is-blocked" : "sheet-url"}
+            onSubmit={(event) => saveSheet(event, sheet.slot)}
+          >
+            <div className="writer-label">
+              <label htmlFor={`sheet-url-${sheet.slot}`}>Google Sheet {sheet.slot}</label>
+              <span>{sheet.blocked ? "Writing paused" : "Day tab · Staff stays untouched"}</span>
+            </div>
+            <div className="sheet-url-row">
+              <input
+                id={`sheet-url-${sheet.slot}`}
+                type="url"
+                inputMode="url"
+                spellCheck={false}
+                autoComplete="off"
+                value={sheet.sheet_url}
+                placeholder="Paste the Google Sheet link"
+                disabled={sheet.blocked}
+                onChange={(event) => updateSheetUrl(sheet.slot, event.target.value)}
+              />
+              {link && (
+                <a className="sheet-open" href={link} target="_blank" rel="noreferrer">Open</a>
+              )}
+              <button type="submit" disabled={sheet.blocked || busyHere || !link}>{sheetBusy === sheet.slot ? "Saving…" : "Save"}</button>
+              <button
+                type="button"
+                className="sheet-sync"
+                onClick={() => syncSheet(sheet.slot)}
+                disabled={busyHere || sheetBusy !== 0 || sheetSyncing !== 0 || rowsBusy || tallying || !link}
+                aria-busy={sheetSyncing === sheet.slot}
+              >
+                {sheetSyncing === sheet.slot ? "Syncing…" : "Sync with Google Sheet"}
+              </button>
+              <button
+                type="button"
+                className={sheet.blocked ? "sheet-unblock" : "sheet-block"}
+                onClick={() => blockSheet(sheet.slot, !sheet.blocked)}
+                disabled={busyHere || sheetBlocking !== 0 || !link}
+              >
+                {sheetBlocking === sheet.slot ? "Saving…" : sheet.blocked ? "Unblock Sheet" : "Block Sheet"}
+              </button>
+            </div>
+          </form>
+        );
+      })}
       <form className="sheet-starts" onSubmit={saveStartRows}>
         <label className={startRowsValid ? "" : "is-invalid"}>
           Deposits from
@@ -340,21 +431,12 @@ export default function Dashboard() {
             onChange={(event) => setWithdrawStart(event.target.value.replace(/[^\d]/g, ""))}
           />
         </label>
-        <button type="submit" disabled={rowsBusy || sheetSyncing || tallying || !startRowsValid}>{rowsBusy ? "Saving…" : "Save rows"}</button>
-        <button
-          type="button"
-          className="sheet-sync"
-          onClick={syncSheet}
-          disabled={sheetSyncing || sheetBusy || rowsBusy || tallying || !sheetUrl.trim()}
-          aria-busy={sheetSyncing}
-        >
-          {sheetSyncing ? "Syncing with Google Sheet…" : "Sync with Google Sheet"}
-        </button>
+        <button type="submit" disabled={rowsBusy || sheetSyncing !== 0 || tallying || !startRowsValid}>{rowsBusy ? "Saving…" : "Save rows"}</button>
         <button
           type="button"
           className="sheet-tally"
           onClick={tallyBanks}
-          disabled={tallying || sheetSyncing || rowsBusy || sheetBusy}
+          disabled={tallying || sheetSyncing !== 0 || rowsBusy || sheetBusy !== 0}
           aria-busy={tallying}
         >
           Tally System Banks
@@ -366,7 +448,7 @@ export default function Dashboard() {
         </p>
       </form>
       {sheetNote && (
-        <p className={sheetNote.startsWith("Saved") || sheetNote.startsWith("Wrote") || sheetNote.startsWith("Tallied") ? "sheet-url-note is-ok" : "sheet-url-note is-error"} role="status">
+        <p className={sheetNoteOk ? "sheet-url-note is-ok" : "sheet-url-note is-error"} role="status">
           {sheetNote}
         </p>
       )}

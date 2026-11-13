@@ -243,24 +243,38 @@ class BankTransfer(models.Model):
 
 
 class GoogleSheetSetting(models.Model):
-    """The spreadsheet URL entered in the web app. One row for the whole system."""
+    """One spreadsheet the web app writes to. Slots 1–3 are Google Sheet 1, 2, and 3.
 
+    Deposit and withdrawal start rows are shared and stored on slot 1.
+    """
+
+    slot = models.PositiveSmallIntegerField(default=1, unique=True)
     sheet_url = models.URLField(max_length=500, blank=True)
+    blocked = models.BooleanField(default=False)
     deposit_start_row = models.PositiveIntegerField(default=105)
     withdraw_start_row = models.PositiveIntegerField(default=1024)
     last_error = models.TextField(blank=True)
     last_written_at = models.DateTimeField(null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    class Meta:
+        ordering = ["slot"]
+
     def __str__(self) -> str:
-        return self.sheet_url or "No sheet"
+        return self.sheet_url or f"Google Sheet {self.slot}"
 
 
 class SheetExport(models.Model):
-    """A completed deposit or withdrawal already appended to the sheet."""
+    """A completed deposit or withdrawal already written to one Google Sheet slot."""
 
-    transaction = models.OneToOneField(Transaction, on_delete=models.CASCADE, related_name="sheet_export")
+    transaction = models.ForeignKey(Transaction, on_delete=models.CASCADE, related_name="sheet_exports")
+    slot = models.PositiveSmallIntegerField(default=1)
     written_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["transaction", "slot"], name="sheet_export_once"),
+        ]
 
 
 def sydney_today():

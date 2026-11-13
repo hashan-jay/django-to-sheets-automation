@@ -10,7 +10,14 @@ from brands import livecache
 from brands.models import SYDNEY, Brand, sydney_today
 from brands.poller import note_watch, start_poller
 from brands.customers import customer_board, start_customer_sync
-from brands.sheets import export_pending, public_status, save_sheet_url, save_start_rows, sync_brands_for_day
+from brands.sheets import (
+    export_pending,
+    public_status,
+    save_sheet_url,
+    save_start_rows,
+    set_sheet_blocked,
+    sync_brands_for_day,
+)
 from brands.services import (
     bank_accounts,
     bank_ledger,
@@ -37,7 +44,7 @@ class GoogleSheetView(APIView):
             if "deposit_start_row" in request.data or "withdraw_start_row" in request.data:
                 save_start_rows(request.data.get("deposit_start_row"), request.data.get("withdraw_start_row"))
             else:
-                save_sheet_url(str(request.data.get("sheet_url") or ""))
+                save_sheet_url(str(request.data.get("sheet_url") or ""), request.data.get("slot") or 1)
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=400)
         written = export_pending()
@@ -46,13 +53,24 @@ class GoogleSheetView(APIView):
         return Response(body)
 
 
+class GoogleSheetBlockView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        try:
+            set_sheet_blocked(request.data.get("slot") or 1, request.data.get("blocked"))
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=400)
+        return Response(public_status())
+
+
 class GoogleSheetSyncView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
         day = _parse_day(request.data.get("date"))
         try:
-            result = sync_brands_for_day(day)
+            result = sync_brands_for_day(day, request.data.get("slot") or 1)
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=400)
         except Exception as exc:
