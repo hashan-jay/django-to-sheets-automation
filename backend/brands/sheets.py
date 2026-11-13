@@ -411,7 +411,11 @@ def _write_cashbook(
             ids = worksheet.col_values(7)
             existing = _cashbook_ids(worksheet)
             _clear_duplicate_ids(worksheet, ids)
-            bank_choices = _bank_dropdown(worksheet)
+            deposit_choices = _bank_dropdown(worksheet, deposit_start)
+            withdraw_choices = _bank_dropdown(worksheet, withdraw_start) or deposit_choices
+            _copy_owner_validation(worksheet)
+            owner_choices = _owner_dropdown(worksheet)
+            _clear_blank_category(worksheet, ids)
             seen: set[str] = set()
             unique_items: list[Transaction] = []
             for item in items:
@@ -422,15 +426,17 @@ def _write_cashbook(
             already = [item for item in unique_items if item.external_id in existing]
             fresh = [item for item in unique_items if item.external_id not in existing]
             _remember(already, slot)
-            _align_existing_banks(worksheet, already, bank_choices)
+            _align_existing_banks(worksheet, [item for item in already if item.type != "WITHDRAW"], deposit_choices)
+            _align_existing_banks(worksheet, [item for item in already if item.type == "WITHDRAW"], withdraw_choices)
+            _align_existing_owners(worksheet, already, owner_choices)
             deposits = [item for item in fresh if item.type != "WITHDRAW"]
             withdraws = [item for item in fresh if item.type == "WITHDRAW"]
-            placed = _write_block(worksheet, ids, deposits, deposit_start, deposit_end, bank_choices)
+            placed = _write_block(worksheet, ids, deposits, deposit_start, deposit_end, deposit_choices, owner_choices)
             needed_rows = withdraw_start + len(withdraws) + 5
             if worksheet.row_count < needed_rows:
                 worksheet.add_rows(needed_rows - worksheet.row_count)
             withdraw_end = max(worksheet.row_count, needed_rows)
-            placed += _write_block(worksheet, ids, withdraws, withdraw_start, withdraw_end, bank_choices)
+            placed += _write_block(worksheet, ids, withdraws, withdraw_start, withdraw_end, withdraw_choices, owner_choices)
             _remember(placed, slot)
             written.extend(already)
             written.extend(placed)
@@ -548,7 +554,15 @@ def _remember(items: list[Transaction], slot: int = 1) -> None:
         )
 
 
-def _write_block(worksheet, id_column: list[str], items: list[Transaction], start: int, end: int, bank_choices: list[str] | None = None):
+def _write_block(
+    worksheet,
+    id_column: list[str],
+    items: list[Transaction],
+    start: int,
+    end: int,
+    bank_choices: list[str] | None = None,
+    owner_choices: list[str] | None = None,
+):
     if not items:
         return []
     slots = _empty_slots(id_column, start, end, len(items))
@@ -557,19 +571,30 @@ def _write_block(worksheet, id_column: list[str], items: list[Transaction], star
     batch = items[: len(slots)]
     ranges = []
     run_start = slots[0]
-    run_values = [_cashbook_cells(batch[0], bank_choices)]
+    run_values = [_cashbook_cells(batch[0], bank_choices, owner_choices)]
     for index in range(1, len(slots)):
         if slots[index] == slots[index - 1] + 1:
-            run_values.append(_cashbook_cells(batch[index], bank_choices))
+            run_values.append(_cashbook_cells(batch[index], bank_choices, owner_choices))
             continue
         ranges.append((run_start, run_values))
         run_start = slots[index]
-        run_values = [_cashbook_cells(batch[index], bank_choices)]
+        run_values = [_cashbook_cells(batch[index], bank_choices, owner_choices)]
     ranges.append((run_start, run_values))
+    # Column I is the Category dropdown. Writing a blank there is what Sheets marks invalid.
     worksheet.batch_update(
         [
-            {"range": f"B{start_row}:J{start_row + len(values) - 1}", "values": values}
+            item
             for start_row, values in ranges
+            for item in (
+                {
+                    "range": f"B{start_row}:H{start_row + len(values) - 1}",
+                    "values": [row[:7] for row in values],
+                },
+                {
+                    "range": f"J{start_row}:J{start_row + len(values) - 1}",
+                    "values": [[row[8]] for row in values],
+                },
+            )
         ],
         value_input_option="USER_ENTERED",
     )
@@ -682,23 +707,32 @@ def _patch_gateway_tabs(tabs, grouped: dict[str, list[Transaction]]) -> int:
     return updated
 
 
-def _bank_dropdown(worksheet) -> list[str]:
-    """The Bank column's dropdown entries. Empty when this tab has no list."""
+def _bank_dropdown(worksheet, around_row: int = 105) -> list[str]:
+    """Dropdown entries for the Bank column around a deposit or withdrawal row."""
     cached = getattr(worksheet, "_kaboom_banks", None)
-    if cached is not None:
-        return cached
-    choices = _read_bank_dropdown(worksheet)
-    worksheet._kaboom_banks = choices
-    return choices
+    if not isinstance(cached, dict):
+        cached = {}
+        worksheet._kaboom_banks = cached
+    key = max(2, int(around_row))
+    if key not in cached:
+        cached[key] = _read_dropdown(worksheet, "C", key, key + 30)
+    return cached[key]
 
 
-def _read_bank_dropdown(worksheet) -> list[str]:
+def _read_bank_dropdown(worksheet, start_row: int = 105, end_row: int = 135) -> list[str]:
+    return _read_dropdown(worksheet, "C", start_row, end_row)
+
+
+def _read_dropdown(worksheet, column: str, start_row: int = 105, end_row: int = 135) -> list[str]:
     title = str(worksheet.title).replace("'", "''")
+    column = str(column or "C").upper()
+    start_row = max(2, int(start_row))
+    end_row = max(start_row, int(end_row))
     try:
         meta = worksheet.spreadsheet.fetch_sheet_metadata(
             {
                 "includeGridData": True,
-                "ranges": [f"'{title}'!C2:C20", f"'{title}'!C100:C140"],
+                "ranges": [f"'{title}'!{column}{start_row}:{column}{end_row}"],
                 "fields": "sheets.data.rowData.values.dataValidation",
             }
         )
@@ -881,7 +915,114 @@ def _sheet_bank(item: Transaction) -> str:
     return (item.method or "").strip()
 
 
-def _cashbook_cells(item: Transaction, bank_choices: list[str] | None = None) -> list[str]:
+OWNER_COLUMN = 8
+OWNER_VALID_ROW = 428
+
+
+def _owner_dropdown(worksheet) -> list[str]:
+    """Company Owner entries from the row the sheet already accepts as valid."""
+    choices = _read_dropdown(worksheet, "H", OWNER_VALID_ROW, OWNER_VALID_ROW + 20)
+    if choices:
+        return choices
+    return _read_dropdown(worksheet, "H", 105, 140)
+
+
+def _validation_rule(worksheet, column: str, row: int) -> dict | None:
+    title = str(worksheet.title).replace("'", "''")
+    meta = worksheet.spreadsheet.fetch_sheet_metadata(
+        {
+            "includeGridData": True,
+            "ranges": [f"'{title}'!{column}{row}"],
+            "fields": "sheets.data.rowData.values.dataValidation",
+        }
+    )
+    for sheet in meta.get("sheets") or []:
+        for grid in sheet.get("data") or []:
+            for grid_row in grid.get("rowData") or []:
+                for cell in grid_row.get("values") or []:
+                    rule = cell.get("dataValidation")
+                    if rule and rule.get("condition"):
+                        return rule
+    return None
+
+
+def _copy_owner_validation(worksheet) -> None:
+    """Rows above 428 use another list, so the same Company Owner is marked invalid there.
+
+    Apply the exact row-428 rule, including its range, to those earlier rows.
+    """
+    rule = _validation_rule(worksheet, "H", OWNER_VALID_ROW)
+    if not rule:
+        return
+    try:
+        worksheet.spreadsheet.batch_update(
+            {
+                "requests": [
+                    {
+                        "setDataValidation": {
+                            "range": {
+                                "sheetId": worksheet.id,
+                                "startRowIndex": 1,
+                                "endRowIndex": OWNER_VALID_ROW - 1,
+                                "startColumnIndex": OWNER_COLUMN - 1,
+                                "endColumnIndex": OWNER_COLUMN,
+                            },
+                            "rule": rule,
+                        }
+                    }
+                ]
+            }
+        )
+    except Exception as exc:
+        log.warning("Company Owner dropdown update failed: %s", str(exc).splitlines()[0][:300])
+
+
+def _clear_blank_category(worksheet, id_column: list[str]) -> None:
+    """A blank written into the Category dropdown is rejected. Remove only those blanks."""
+    categories = worksheet.col_values(9)
+    targets = []
+    for index, txn in enumerate(id_column, start=1):
+        if not str(txn).strip().isdigit():
+            continue
+        if index - 1 >= len(categories):
+            break
+        if str(categories[index - 1]).strip():
+            continue
+        targets.append(f"I{index}")
+    for offset in range(0, len(targets), 200):
+        chunk = targets[offset : offset + 200]
+        if chunk:
+            worksheet.batch_clear(chunk)
+
+
+def _align_existing_owners(worksheet, items: list[Transaction], choices: list[str]) -> None:
+    """Set Company Owner to the dropdown entry. Bank and the other columns stay as they are."""
+    if not items or not choices:
+        return
+    owners = worksheet.col_values(OWNER_COLUMN)
+    ids = worksheet.col_values(7)
+    positions: dict[str, int] = {}
+    for index, value in enumerate(ids, start=1):
+        key = str(value).strip()
+        if key and key not in positions:
+            positions[key] = index
+    ranges = []
+    for item in items:
+        row_number = positions.get(item.external_id)
+        if row_number is None:
+            continue
+        current = owners[row_number - 1].strip() if row_number - 1 < len(owners) else ""
+        matched = _match_bank(item.brand.name, choices)
+        if not matched or current == matched:
+            continue
+        ranges.append({"range": f"H{row_number}", "values": [[matched]]})
+    for offset in range(0, len(ranges), 200):
+        chunk = ranges[offset : offset + 200]
+        if chunk:
+            worksheet.batch_update(chunk, value_input_option="USER_ENTERED")
+
+
+def _cashbook_cells(item: Transaction, bank_choices: list[str] | None = None, owner_choices: list[str] | None = None) -> list[str]:
     """B Date through J Player. Column A, Rate, and Staff are never written."""
     amount = f"{abs(item.amount):.2f}"
     status = "Withdraw" if item.type == "WITHDRAW" else "Deposit"
@@ -894,7 +1035,7 @@ def _cashbook_cells(item: Transaction, bank_choices: list[str] | None = None) ->
         amount,
         status,
         item.external_id,
-        item.brand.name,
+        _match_bank(item.brand.name, owner_choices or []),
         "",
         item.username,
     ]
