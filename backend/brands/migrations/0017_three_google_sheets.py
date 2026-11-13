@@ -5,7 +5,13 @@ import django.db.models.deletion
 def create_extra_slots(apps, schema_editor):
     GoogleSheetSetting = apps.get_model("brands", "GoogleSheetSetting")
     for slot in (2, 3):
-        GoogleSheetSetting.objects.get_or_create(slot=slot, defaults={"sheet_url": "", "blocked": False})
+        if GoogleSheetSetting.objects.filter(slot=slot).exists():
+            continue
+        GoogleSheetSetting.objects.create(id=slot, slot=slot, sheet_url="", blocked=False)
+    schema_editor.execute(
+        "SELECT setval(pg_get_serial_sequence('brands_googlesheetsetting', 'id'), "
+        "(SELECT COALESCE(MAX(id), 1) FROM brands_googlesheetsetting))"
+    )
 
 
 class Migration(migrations.Migration):

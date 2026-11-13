@@ -32,8 +32,12 @@ export async function api(path, options = {}) {
     window.location.reload();
   }
   if (!response.ok) {
-    const message = data?.detail || "Request failed";
-    throw new Error(typeof message === "string" ? message : "Request failed");
+    let message = data?.detail || "Request failed";
+    if (typeof message !== "string") message = "Request failed";
+    if (message.includes("<html") || message.includes("<!DOCTYPE")) {
+      message = "The server hit an error while saving. Restart the app after the database update, then try again.";
+    }
+    throw new Error(message.slice(0, 500));
   }
   return data;
 }

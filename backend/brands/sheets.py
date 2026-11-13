@@ -299,22 +299,24 @@ def _writer_loop() -> None:
             close_old_connections()
 
 
-def export_pending(limit: int = 200) -> int:
+def export_pending(limit: int = 200, slot=None) -> int:
     """Append rows that have not been written yet.
 
     Returns the number written, 0 when nothing is waiting, or -1 when another
-    sheet write is already in progress.
+    sheet write is already in progress. Pass slot to write only that sheet.
     """
     if not _lock.acquire(blocking=False):
         return -1
     try:
-        return _export_pending(limit)
+        return _export_pending(limit, None if slot is None else _slot_number(slot))
     finally:
         _lock.release()
 
 
-def _export_pending(limit: int) -> int:
+def _export_pending(limit: int, only_slot: int | None = None) -> int:
     sheets = active_sheet_settings()
+    if only_slot is not None:
+        sheets = [row for row in sheets if row.slot == only_slot]
     if not sheets:
         return 0
     shared = sheet_setting(1)

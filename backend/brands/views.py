@@ -47,8 +47,18 @@ class GoogleSheetView(APIView):
                 save_sheet_url(str(request.data.get("sheet_url") or ""), request.data.get("slot") or 1)
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=400)
-        written = export_pending()
-        body = public_status()
+        except Exception as exc:
+            message = str(exc).splitlines()[0][:500] or "The Google Sheet could not be saved."
+            return Response({"detail": message}, status=500)
+        try:
+            if "sheet_url" in request.data:
+                written = export_pending(slot=request.data.get("slot") or 1)
+            else:
+                written = export_pending()
+            body = public_status()
+        except Exception as exc:
+            message = str(exc).splitlines()[0][:500] or "The Google Sheet could not be saved."
+            return Response({"detail": message}, status=500)
         body["written_now"] = written
         return Response(body)
 
