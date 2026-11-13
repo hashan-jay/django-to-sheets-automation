@@ -411,6 +411,7 @@ def _write_cashbook(
             ids = worksheet.col_values(7)
             existing = _cashbook_ids(worksheet)
             _clear_duplicate_ids(worksheet, ids)
+            bank_choices = _bank_dropdown(worksheet)
             seen: set[str] = set()
             unique_items: list[Transaction] = []
             for item in items:
@@ -421,14 +422,15 @@ def _write_cashbook(
             already = [item for item in unique_items if item.external_id in existing]
             fresh = [item for item in unique_items if item.external_id not in existing]
             _remember(already, slot)
+            _align_existing_banks(worksheet, already, bank_choices)
             deposits = [item for item in fresh if item.type != "WITHDRAW"]
             withdraws = [item for item in fresh if item.type == "WITHDRAW"]
-            placed = _write_block(worksheet, ids, deposits, deposit_start, deposit_end)
+            placed = _write_block(worksheet, ids, deposits, deposit_start, deposit_end, bank_choices)
             needed_rows = withdraw_start + len(withdraws) + 5
             if worksheet.row_count < needed_rows:
                 worksheet.add_rows(needed_rows - worksheet.row_count)
             withdraw_end = max(worksheet.row_count, needed_rows)
-            placed += _write_block(worksheet, ids, withdraws, withdraw_start, withdraw_end)
+            placed += _write_block(worksheet, ids, withdraws, withdraw_start, withdraw_end, bank_choices)
             _remember(placed, slot)
             written.extend(already)
             written.extend(placed)
@@ -500,7 +502,7 @@ def _write_payment_methods(spreadsheet, day) -> int:
         slot = positions.get(item.external_id)
         if slot is None:
             continue
-        ranges.append({"range": f"C{slot}", "values": [[item.method.strip()]]})
+        ranges.append({"range": f"C{slot}", "values": [[_match_bank(item.method.strip(), _bank_dropdown(worksheet))]]})
     for offset in range(0, len(ranges), 200):
         chunk = ranges[offset : offset + 200]
         if chunk:
@@ -546,7 +548,7 @@ def _remember(items: list[Transaction], slot: int = 1) -> None:
         )
 
 
-def _write_block(worksheet, id_column: list[str], items: list[Transaction], start: int, end: int):
+def _write_block(worksheet, id_column: list[str], items: list[Transaction], start: int, end: int, bank_choices: list[str] | None = None):
     if not items:
         return []
     slots = _empty_slots(id_column, start, end, len(items))
@@ -555,14 +557,14 @@ def _write_block(worksheet, id_column: list[str], items: list[Transaction], star
     batch = items[: len(slots)]
     ranges = []
     run_start = slots[0]
-    run_values = [_cashbook_cells(batch[0])]
+    run_values = [_cashbook_cells(batch[0], bank_choices)]
     for index in range(1, len(slots)):
         if slots[index] == slots[index - 1] + 1:
-            run_values.append(_cashbook_cells(batch[index]))
+            run_values.append(_cashbook_cells(batch[index], bank_choices))
             continue
         ranges.append((run_start, run_values))
         run_start = slots[index]
-        run_values = [_cashbook_cells(batch[index])]
+        run_values = [_cashbook_cells(batch[index], bank_choices)]
     ranges.append((run_start, run_values))
     worksheet.batch_update(
         [
@@ -671,13 +673,180 @@ def _patch_gateway_tabs(tabs, grouped: dict[str, list[Transaction]]) -> int:
             method = item.method.strip()
             if not method or current == method:
                 continue
-            ranges.append({"range": f"C{row_number}", "values": [[method]]})
+            ranges.append({"range": f"C{row_number}", "values": [[_match_bank(method, _bank_dropdown(worksheet))]]})
         for offset in range(0, len(ranges), 200):
             chunk = ranges[offset : offset + 200]
             if chunk:
                 worksheet.batch_update(chunk, value_input_option="USER_ENTERED")
                 updated += len(chunk)
     return updated
+
+
+def _bank_dropdown(worksheet) -> list[str]:
+    """The Bank column's dropdown entries. Empty when this tab has no list."""
+    cached = getattr(worksheet, "_kaboom_banks", None)
+    if cached is not None:
+        return cached
+    choices = _read_bank_dropdown(worksheet)
+    worksheet._kaboom_banks = choices
+    return choices
+
+
+def _read_bank_dropdown(worksheet) -> list[str]:
+    title = str(worksheet.title).replace("'", "''")
+    try:
+        meta = worksheet.spreadsheet.fetch_sheet_metadata(
+            {
+                "includeGridData": True,
+                "ranges": [f"'{title}'!C2:C20", f"'{title}'!C100:C140"],
+                "fields": "sheets.data.rowData.values.dataValidation",
+            }
+        )
+    except Exception as exc:
+        log.warning("Bank dropdown lookup failed: %s", str(exc).splitlines()[0][:300])
+        return []
+    rule = None
+    for sheet in meta.get("sheets") or []:
+        for grid in sheet.get("data") or []:
+            for row in grid.get("rowData") or []:
+                for cell in row.get("values") or []:
+                    found = cell.get("dataValidation")
+                    if found:
+                        rule = found
+                        break
+                if rule:
+                    break
+            if rule:
+                break
+        if rule:
+            break
+    if not rule:
+        return []
+    condition = rule.get("condition") or {}
+    raw_values = [str(item.get("userEnteredValue") or "").strip() for item in condition.get("values") or []]
+    raw_values = [item for item in raw_values if item]
+    kind = condition.get("type")
+    if kind == "ONE_OF_LIST":
+        return raw_values
+    if kind == "ONE_OF_RANGE" and raw_values:
+        return _dropdown_range_values(worksheet.spreadsheet, raw_values[0])
+    return []
+
+
+def _dropdown_range_values(spreadsheet, raw: str) -> list[str]:
+    ref = str(raw or "").strip().lstrip("=")
+    if not ref:
+        return []
+    try:
+        result = spreadsheet.values_get(ref)
+    except Exception as exc:
+        log.warning("Bank dropdown range failed: %s", str(exc).splitlines()[0][:300])
+        return []
+    found: list[str] = []
+    seen: set[str] = set()
+    for row in result.get("values") or []:
+        for cell in row:
+            text = str(cell).strip()
+            key = text.casefold()
+            if text and key not in seen:
+                seen.add(key)
+                found.append(text)
+    return found
+
+
+def _bank_key(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(text or "").casefold())
+
+
+def _bank_tokens(text: str) -> tuple[str, ...]:
+    return tuple(sorted(part for part in re.sub(r"[^a-z0-9]+", " ", str(text or "").casefold()).split() if part))
+
+
+_BANK_SUFFIXES = {"au", "nz", "uk", "us", "sg"}
+
+
+def _token_gap(left: str, right: str) -> int | None:
+    """0 when the words are the same. A small gap when one is the other plus a country code, as in ING and INGAU."""
+    if left == right:
+        return 0
+    longer, shorter = (left, right) if len(left) >= len(right) else (right, left)
+    if len(shorter) < 2 or not longer.startswith(shorter):
+        return None
+    extra = longer[len(shorter) :]
+    if extra in _BANK_SUFFIXES:
+        return len(extra)
+    return None
+
+
+def _dropdown_score(label: str, choice: str) -> int | None:
+    label_tokens = _bank_tokens(label)
+    choice_tokens = list(_bank_tokens(choice))
+    if not label_tokens or len(label_tokens) != len(choice_tokens):
+        return None
+    score = 0
+    for token in label_tokens:
+        found = None
+        best = 99
+        for index, other in enumerate(choice_tokens):
+            gap = _token_gap(token, other)
+            if gap is None or gap >= best:
+                continue
+            best = gap
+            found = index
+        if found is None:
+            return None
+        score += best
+        choice_tokens.pop(found)
+    return score
+
+
+def _match_bank(label: str, choices: list[str]) -> str:
+    """Return the dropdown entry for this bank. The cell is then that list value, not a free-typed name.
+
+    ANZ JOSEPH PERERA matches Joseph Perera anz. INGAU SZE LIN LAU matches ING SZE LIN LAU.
+    """
+    text = str(label or "").strip()
+    if not text or not choices:
+        return text
+    best_choice = ""
+    best_score = None
+    for choice in choices:
+        if choice.strip() == text:
+            return choice
+        score = 0 if _bank_key(choice) == _bank_key(text) else _dropdown_score(text, choice)
+        if score is None:
+            continue
+        if best_score is None or score < best_score:
+            best_score = score
+            best_choice = choice
+    return best_choice or text
+
+
+def _align_existing_banks(worksheet, items: list[Transaction], choices: list[str]) -> None:
+    """Point Bank cells already on this tab at the matching dropdown entry. Other columns stay as they are."""
+    if not items or not choices:
+        return
+    banks = worksheet.col_values(3)
+    ids = worksheet.col_values(7)
+    positions: dict[str, int] = {}
+    for index, value in enumerate(ids, start=1):
+        key = str(value).strip()
+        if key and key not in positions:
+            positions[key] = index
+    ranges = []
+    for item in items:
+        row_number = positions.get(item.external_id)
+        if row_number is None:
+            continue
+        current = banks[row_number - 1].strip() if row_number - 1 < len(banks) else ""
+        matched = _match_bank(_sheet_bank(item), choices)
+        if not matched or current == matched:
+            continue
+        ranges.append({"range": f"C{row_number}", "values": [[matched]]})
+    for offset in range(0, len(ranges), 200):
+        chunk = ranges[offset : offset + 200]
+        if chunk:
+            worksheet.batch_update(chunk, value_input_option="USER_ENTERED")
 
 
 def _sheet_bank(item: Transaction) -> str:
@@ -694,7 +863,7 @@ def _sheet_bank(item: Transaction) -> str:
     return (item.method or "").strip()
 
 
-def _cashbook_cells(item: Transaction) -> list[str]:
+def _cashbook_cells(item: Transaction, bank_choices: list[str] | None = None) -> list[str]:
     """B Date through J Player. Column A, Rate, and Staff are never written."""
     amount = f"{abs(item.amount):.2f}"
     status = "Withdraw" if item.type == "WITHDRAW" else "Deposit"
@@ -702,7 +871,7 @@ def _cashbook_cells(item: Transaction) -> list[str]:
         amount = f"-{amount}"
     return [
         _when(item),
-        _sheet_bank(item),
+        _match_bank(_sheet_bank(item), bank_choices or []),
         (item.player_name or "").strip(),
         amount,
         status,
@@ -748,7 +917,10 @@ def repair_written_columns() -> int:
                 if row_number is None:
                     continue
                 ranges.append(
-                    {"range": f"C{row_number}:D{row_number}", "values": [[_sheet_bank(item), (item.player_name or "").strip()]]}
+                    {
+                        "range": f"C{row_number}:D{row_number}",
+                        "values": [[_match_bank(_sheet_bank(item), _bank_dropdown(worksheet)), (item.player_name or "").strip()]],
+                    }
                 )
             for offset in range(0, len(ranges), 200):
                 chunk = ranges[offset : offset + 200]
