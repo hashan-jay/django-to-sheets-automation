@@ -381,8 +381,7 @@ export default function Dashboard() {
             <div className="writer-label">
               <label htmlFor={`sheet-url-${sheet.slot}`}>
                 {sheet.sheet_name ? <strong className="sheet-heading">{sheet.sheet_name}</strong> : null}
-                {sheet.sheet_name ? " · " : ""}
-                Google Sheet {sheet.slot}
+                <span>Google Sheet {sheet.slot}</span>
               </label>
               <span>{sheet.blocked ? "Writing paused" : "Day tab · Staff stays untouched"}</span>
             </div>
