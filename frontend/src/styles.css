@@ -64,19 +64,26 @@ button {
 
 .writer {
   margin: 14px 18px 0;
-  padding: 14px;
-  border: 1px solid #e4ebf2;
-  border-radius: 16px;
-  background: linear-gradient(180deg, #f8fbfb 0%, #fff 42%);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .sheet-url {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 6px;
-  margin: 0 0 12px;
+  gap: 12px;
+  margin: 0;
   max-width: none;
+  padding: 14px 14px 12px;
+  border: 1px solid #e4ebf2;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(15, 39, 68, 0.04);
 }
 
 .sheet-url.is-blocked .sheet-url-row {
@@ -113,27 +120,28 @@ button {
   font-weight: 750;
 }
 
-.sheet-url label {
+.sheet-url > .writer-label label {
   display: flex;
   flex-direction: row;
   flex-wrap: wrap;
   align-items: baseline;
   gap: 6px;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
-  letter-spacing: 0.02em;
-  color: var(--muted);
+  letter-spacing: 0;
+  color: #0a1628;
 }
 
 .sheet-url-row {
   display: flex;
   flex-wrap: wrap;
-  align-items: stretch;
+  align-items: center;
+  gap: 8px;
   min-width: 0;
-  border: 1px solid #d5dee8;
-  border-radius: 12px;
-  background: #fff;
-  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  overflow: visible;
 }
 
 .sheet-url-row:focus-within {
@@ -141,49 +149,51 @@ button {
   box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.15);
 }
 
-.sheet-url input {
-  flex: 1 1 240px;
+.sheet-url-row input {
+  flex: 1 1 280px;
   width: auto;
-  min-width: 180px;
-  border: 0;
-  background: transparent;
+  min-width: 220px;
+  height: 42px;
+  border: 1px solid #d5dee8;
+  border-radius: 12px;
+  background: #f8fafc;
   color: var(--ink);
-  padding: 11px 14px;
+  padding: 0 14px;
   outline: none;
 }
 
-.sheet-url button {
+.sheet-url-row button {
   flex: 0 0 auto;
+  height: 42px;
   border: 0;
-  border-left: 1px solid #d5dee8;
-  border-radius: 0;
+  border-radius: 12px;
   padding: 0 14px;
   background: #0f766e;
   color: #fff;
   font-weight: 700;
 }
 
-.sheet-url button.sheet-sync {
+.sheet-url-row button.sheet-sync {
   background: #115e59;
 }
 
-.sheet-url button.sheet-block {
+.sheet-url-row button.sheet-block {
   background: #92400e;
 }
 
-.sheet-url button.sheet-auto.on {
+.sheet-url-row button.sheet-auto.on {
   background: #0f766e;
 }
 
-.sheet-url button.sheet-auto.off {
+.sheet-url-row button.sheet-auto.off {
   background: #b91c1c;
 }
 
-.sheet-url button.sheet-unblock {
+.sheet-url-row button.sheet-unblock {
   background: #1d4ed8;
 }
 
-.sheet-url button:disabled {
+.sheet-url-row button:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }
@@ -191,8 +201,10 @@ button {
 .sheet-open {
   display: grid;
   place-items: center;
+  height: 42px;
   padding: 0 14px;
-  border-left: 1px solid #d5dee8;
+  border: 1px solid #d5dee8;
+  border-radius: 12px;
   color: #0f766e;
   font-size: 13px;
   font-weight: 700;
@@ -217,11 +229,11 @@ button {
 .sheet-starts {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 12px;
-  margin: 14px 0 0;
-  padding-top: 14px;
-  border-top: 1px solid #e7eef4;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding-top: 0;
+  border-top: 0;
 }
 
 .sheet-start-hint {
@@ -237,22 +249,27 @@ button {
   border-color: #f59e0b;
 }
 
-.sheet-starts label {
+.sheet-url .sheet-starts label {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
   font-size: 12px;
   font-weight: 700;
   color: var(--muted);
 }
 
-.sheet-starts input {
-  width: 140px;
+.sheet-url .sheet-starts input {
+  flex: none;
+  width: 84px;
+  height: 40px;
+  min-width: 0;
   border: 1px solid #d5dee8;
   border-radius: 12px;
-  background: #fff;
+  background: #f8fafc;
   color: var(--ink);
-  padding: 11px 12px;
+  padding: 0 12px;
 }
 
 .sheet-starts input:focus {
@@ -262,9 +279,10 @@ button {
 }
 
 .sheet-starts button {
+  height: 40px;
   border: 0;
   border-radius: 12px;
-  padding: 11px 16px;
+  padding: 0 16px;
   background: #0f766e;
   color: #fff;
   font-weight: 700;
