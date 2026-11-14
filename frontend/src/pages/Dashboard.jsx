@@ -414,6 +414,41 @@ export default function Dashboard() {
       </div>
       <p className="command-scope">{formatDay(date)}</p>
     </div>
+    <div className="page-controls">
+      <button
+        type="button"
+        className="sheet-tally"
+        onClick={tallyBanks}
+        disabled={tallying || sheetSyncing !== 0 || rowsBusy !== 0 || sheetBusy !== 0}
+        aria-busy={tallying}
+      >
+        {tallying ? "Tallying…" : "Tally System Banks"}
+      </button>
+      <label>
+        Brand
+        <select value={brand} onChange={(event) => setBrand(event.target.value)}>
+          <option value="All">{group === "All" ? "All brands" : "All brands in this group"}</option>
+          {visibleBrands.map((item) => (
+            <option key={item.id}>{item.name}</option>
+          ))}
+        </select>
+      </label>
+      <DateField value={date} onChange={setDate} />
+      <button type="button" className={live ? "live on" : "live off"} aria-pressed={live} onClick={() => setLive((value) => !value)}>
+        <span className="live-copy">
+          <strong>{live ? "Live on" : "Live off"}</strong>
+          <small>{live ? "Updates every second" : "Updates are paused"}</small>
+        </span>
+      </button>
+      <button type="button" className="primary" onClick={refreshNow} disabled={refreshing}>
+        {refreshing ? "Refreshing…" : "Refresh now"}
+      </button>
+      <p className="status control-status">
+        <strong>{viewStatus.title}</strong>
+        <span>{viewStatus.detail}</span>
+      </p>
+      {error && <p className="form-error">{error}</p>}
+    </div>
     <div className="writer">
       {sheets.map((sheet) => {
         const link = sheet.sheet_url.trim();
@@ -507,17 +542,6 @@ export default function Dashboard() {
           </form>
         );
       })}
-      <form className="sheet-starts" onSubmit={(event) => event.preventDefault()}>
-        <button
-          type="button"
-          className="sheet-tally"
-          onClick={tallyBanks}
-          disabled={tallying || sheetSyncing !== 0 || rowsBusy !== 0 || sheetBusy !== 0}
-          aria-busy={tallying}
-        >
-          Tally System Banks
-        </button>
-      </form>
       {sheetNote && (
         <p className={sheetNoteOk ? "sheet-url-note is-ok" : "sheet-url-note is-error"} role="status">
           {sheetNote}
@@ -531,32 +555,6 @@ export default function Dashboard() {
           </div>
         </div>
       )}
-    </div>
-    <div className="page-controls">
-      <label>
-        Brand
-        <select value={brand} onChange={(event) => setBrand(event.target.value)}>
-          <option value="All">{group === "All" ? "All brands" : "All brands in this group"}</option>
-          {visibleBrands.map((item) => (
-            <option key={item.id}>{item.name}</option>
-          ))}
-        </select>
-      </label>
-      <DateField value={date} onChange={setDate} />
-      <button type="button" className={live ? "live on" : "live off"} aria-pressed={live} onClick={() => setLive((value) => !value)}>
-        <span className="live-copy">
-          <strong>{live ? "Live on" : "Live off"}</strong>
-          <small>{live ? "Updates every second" : "Updates are paused"}</small>
-        </span>
-      </button>
-      <button type="button" className="primary" onClick={refreshNow} disabled={refreshing}>
-        {refreshing ? "Refreshing…" : "Refresh now"}
-      </button>
-      <p className="status control-status">
-        <strong>{viewStatus.title}</strong>
-        <span>{viewStatus.detail}</span>
-      </p>
-      {error && <p className="form-error">{error}</p>}
     </div>
     </section>
     <BankLedger date={date} group={group} brand={brand} revision={data?.revision || ""} />

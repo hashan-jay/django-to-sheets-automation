@@ -357,8 +357,15 @@ button {
   min-width: 220px;
 }
 
+.page-controls .sheet-tally,
 .sheet-starts button.sheet-tally {
   background: #0a1628;
+  color: #fff;
+  border: 0;
+  border-radius: 12px;
+  min-height: 44px;
+  padding: 0 16px;
+  font-weight: 700;
 }
 
 .tally-overlay {
