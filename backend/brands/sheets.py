@@ -255,7 +255,7 @@ def _sync_brands_for_day(day, slot: int) -> dict:
     spreadsheet = _open_spreadsheet(sheet_id)
     title = str(day.day)
     worksheet = next((item for item in spreadsheet.worksheets() if str(item.title).strip() == title), None)
-    removed = _remove_uncompleted(worksheet, day, slot) if worksheet is not None else 0
+    removed = _remove_uncompleted(worksheet, day, slot) if worksheet is not None and not _sheet_is_locked(worksheet) else 0
     _write_payment_methods(spreadsheet, day)
     written, errors = _write_cashbook(
         spreadsheet,
@@ -398,6 +398,35 @@ def _pending_for_sheet(slot: int, limit: int) -> list[Transaction]:
     return current + older
 
 
+def _locked_sheet_ids(spreadsheet) -> set[int]:
+    """Tabs with the lock icon. The whole sheet is protected, so nothing on it is edited."""
+    cached = getattr(spreadsheet, "_kaboom_locked", None)
+    if isinstance(cached, set):
+        return cached
+    locked: set[int] = set()
+    try:
+        meta = spreadsheet.fetch_sheet_metadata({"fields": "sheets(properties.sheetId,protectedRanges.range)"})
+    except Exception as exc:
+        log.warning("Could not read sheet locks: %s", str(exc).splitlines()[0][:200])
+        spreadsheet._kaboom_locked = locked
+        return locked
+    for sheet in meta.get("sheets") or []:
+        sheet_id = (sheet.get("properties") or {}).get("sheetId")
+        for rule in sheet.get("protectedRanges") or []:
+            area = rule.get("range") or {}
+            whole_sheet = not any(
+                key in area for key in ("startRowIndex", "endRowIndex", "startColumnIndex", "endColumnIndex")
+            )
+            if whole_sheet and sheet_id is not None:
+                locked.add(int(sheet_id))
+    spreadsheet._kaboom_locked = locked
+    return locked
+
+
+def _sheet_is_locked(worksheet) -> bool:
+    return int(worksheet.id) in _locked_sheet_ids(worksheet.spreadsheet)
+
+
 def _open_spreadsheet(sheet_id: str):
     if not CREDENTIALS.is_file():
         raise FileNotFoundError(f"Service account key is missing: {CREDENTIALS}")
@@ -433,6 +462,8 @@ def _write_cashbook(
         worksheet = tabs.get(title)
         if worksheet is None:
             errors.append(f"No tab named {title}.")
+            continue
+        if _sheet_is_locked(worksheet):
             continue
         try:
             ids = worksheet.col_values(7)
@@ -523,7 +554,7 @@ def _write_payment_methods(spreadsheet, day) -> int:
         return 0
     title = str(day.day)
     worksheet = next((item for item in spreadsheet.worksheets() if str(item.title).strip() == title), None)
-    if worksheet is None:
+    if worksheet is None or _sheet_is_locked(worksheet):
         return 0
     positions: dict[str, int] = {}
     for index, value in enumerate(worksheet.col_values(7), start=1):
@@ -707,7 +738,7 @@ def _patch_gateway_tabs(tabs, grouped: dict[str, list[Transaction]]) -> int:
     updated = 0
     for title, group in grouped.items():
         worksheet = tabs.get(title)
-        if worksheet is None:
+        if worksheet is None or _sheet_is_locked(worksheet):
             continue
         positions: dict[str, tuple[int, str]] = {}
         for index, cells in enumerate(worksheet.get("C:G"), start=1):
@@ -1089,7 +1120,7 @@ def repair_written_columns() -> int:
             grouped.setdefault(_tab_name(mark.transaction), []).append(mark.transaction)
         for title, items in grouped.items():
             worksheet = tabs.get(title)
-            if worksheet is None:
+            if worksheet is None or _sheet_is_locked(worksheet):
                 continue
             ids = worksheet.col_values(7)
             positions = {}
