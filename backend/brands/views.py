@@ -15,6 +15,7 @@ from brands.sheets import (
     public_status,
     save_sheet_url,
     save_start_rows,
+    set_sheet_auto_sync,
     set_sheet_blocked,
     sync_brands_for_day,
 )
@@ -42,7 +43,11 @@ class GoogleSheetView(APIView):
     def post(self, request):
         try:
             if "deposit_start_row" in request.data or "withdraw_start_row" in request.data:
-                save_start_rows(request.data.get("deposit_start_row"), request.data.get("withdraw_start_row"))
+                save_start_rows(
+                    request.data.get("deposit_start_row"),
+                    request.data.get("withdraw_start_row"),
+                    request.data.get("slot") or 1,
+                )
             else:
                 save_sheet_url(str(request.data.get("sheet_url") or ""), request.data.get("slot") or 1)
         except ValueError as exc:
@@ -50,11 +55,14 @@ class GoogleSheetView(APIView):
         except Exception as exc:
             message = str(exc).splitlines()[0][:500] or "The Google Sheet could not be saved."
             return Response({"detail": message}, status=500)
-        try:
-            if "sheet_url" in request.data:
+        written = 0
+        if "sheet_url" in request.data:
+            try:
                 written = export_pending(slot=request.data.get("slot") or 1)
-            else:
-                written = export_pending()
+            except Exception as exc:
+                message = str(exc).splitlines()[0][:500] or "The Google Sheet could not be saved."
+                return Response({"detail": message}, status=500)
+        try:
             body = public_status()
         except Exception as exc:
             message = str(exc).splitlines()[0][:500] or "The Google Sheet could not be saved."
@@ -69,6 +77,17 @@ class GoogleSheetBlockView(APIView):
     def post(self, request):
         try:
             set_sheet_blocked(request.data.get("slot") or 1, request.data.get("blocked"))
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=400)
+        return Response(public_status())
+
+
+class GoogleSheetAutoSyncView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        try:
+            set_sheet_auto_sync(request.data.get("slot") or 1, request.data.get("auto_sync"))
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=400)
         return Response(public_status())

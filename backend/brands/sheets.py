@@ -16,7 +16,7 @@ from django.db import close_old_connections
 from django.db import transaction as db_transaction
 from django.utils import timezone
 
-from brands.models import GoogleSheetSetting, SheetExport, Transaction
+from brands.models import GoogleSheetSetting, SheetExport, Transaction, sydney_today
 
 log = logging.getLogger("django")
 
@@ -33,7 +33,7 @@ DEFAULT_SHEET_URL = (
     "https://docs.google.com/spreadsheets/d/1AsiDeo0e08NEehnnsJZGd29dVXLIMlQ-KaUF_-mW-zY/edit?gid=2040112683"
 )
 DEFAULT_DEPOSIT_START = 105
-DEFAULT_WITHDRAW_START = 1024
+DEFAULT_WITHDRAW_START = 1000
 MIN_SHEET_START_ROW = 2
 MAX_SHEET_START_ROW = 1_000_000
 
@@ -95,7 +95,7 @@ def active_sheet_settings() -> list[GoogleSheetSetting]:
     ensure_sheet_slots()
     rows = []
     for row in GoogleSheetSetting.objects.filter(slot__in=SHEET_SLOTS).order_by("slot"):
-        if row.blocked or not normalize_google_sheet_id(row.sheet_url):
+        if row.blocked or not row.auto_sync or not normalize_google_sheet_id(row.sheet_url):
             continue
         rows.append(row)
     return rows
@@ -135,7 +135,21 @@ def set_sheet_blocked(slot_raw, blocked_raw) -> GoogleSheetSetting:
     return row
 
 
-def save_start_rows(deposit_raw, withdraw_raw) -> GoogleSheetSetting:
+def set_sheet_auto_sync(slot_raw, enabled_raw) -> GoogleSheetSetting:
+    slot = _slot_number(slot_raw)
+    enabled = enabled_raw is True or str(enabled_raw).strip().lower() in {"1", "true", "yes", "on"}
+    row = sheet_setting(slot)
+    if enabled and not normalize_google_sheet_id(row.sheet_url):
+        raise ValueError(f"Save a link for {sheet_label(slot)} before turning Auto Sync on.")
+    row.auto_sync = enabled
+    row.last_error = ""
+    row.save(update_fields=["auto_sync", "last_error", "updated_at"])
+    if enabled and not row.blocked:
+        request_export()
+    return row
+
+
+def save_start_rows(deposit_raw, withdraw_raw, slot_raw=1) -> GoogleSheetSetting:
     """Same bounds as finance-automation: deposits must start before withdrawals."""
     try:
         deposit = int(str(deposit_raw).strip())
@@ -150,7 +164,7 @@ def save_start_rows(deposit_raw, withdraw_raw) -> GoogleSheetSetting:
         raise ValueError(
             f"Deposits must start before withdrawals. Deposit row is {deposit} and withdraw row is {withdraw}."
         )
-    row = sheet_setting()
+    row = sheet_setting(_slot_number(slot_raw))
     row.deposit_start_row = deposit
     row.withdraw_start_row = withdraw
     row.last_error = ""
@@ -165,6 +179,9 @@ def _sheet_public(row: GoogleSheetSetting) -> dict:
         "sheet_name": row.sheet_name,
         "sheet_url": row.sheet_url,
         "blocked": bool(row.blocked),
+        "auto_sync": bool(row.auto_sync),
+        "deposit_start_row": row.deposit_start_row or DEFAULT_DEPOSIT_START,
+        "withdraw_start_row": row.withdraw_start_row or DEFAULT_WITHDRAW_START,
         "sheet_id": normalize_google_sheet_id(row.sheet_url),
         "last_error": row.last_error,
         "last_written_at": row.last_written_at.isoformat() if row.last_written_at else "",
@@ -221,7 +238,6 @@ def sync_brands_for_day(day, slot_raw=1) -> dict:
 
 
 def _sync_brands_for_day(day, slot: int) -> dict:
-    shared = sheet_setting(1)
     row = sheet_setting(slot)
     sheet_id = normalize_google_sheet_id(row.sheet_url)
     if not sheet_id:
@@ -244,8 +260,8 @@ def _sync_brands_for_day(day, slot: int) -> dict:
     written, errors = _write_cashbook(
         spreadsheet,
         pending,
-        shared.deposit_start_row or DEFAULT_DEPOSIT_START,
-        shared.withdraw_start_row or DEFAULT_WITHDRAW_START,
+        row.deposit_start_row or DEFAULT_DEPOSIT_START,
+        row.withdraw_start_row or DEFAULT_WITHDRAW_START,
         slot,
     )
     if worksheet is not None:
@@ -342,17 +358,11 @@ def _export_pending(limit: int, only_slot: int | None = None) -> int:
         sheets = [row for row in sheets if row.slot == only_slot]
     if not sheets:
         return 0
-    shared = sheet_setting(1)
-    deposit_start = shared.deposit_start_row or DEFAULT_DEPOSIT_START
-    withdraw_start = shared.withdraw_start_row or DEFAULT_WITHDRAW_START
     written_total = 0
     for row in sheets:
-        pending = list(
-            Transaction.objects.filter(status="COMPLETED", type__in=["DEPOSIT", "WITHDRAW"])
-            .exclude(sheet_exports__slot=row.slot)
-            .select_related("brand")
-            .order_by("txn_date", "created_at", "id")[:limit]
-        )
+        deposit_start = row.deposit_start_row or DEFAULT_DEPOSIT_START
+        withdraw_start = row.withdraw_start_row or DEFAULT_WITHDRAW_START
+        pending = _pending_for_sheet(row.slot, limit)
         if not pending:
             continue
         try:
@@ -369,6 +379,23 @@ def _export_pending(limit: int, only_slot: int | None = None) -> int:
         )
         written_total += len(written)
     return written_total
+
+
+def _pending_for_sheet(slot: int, limit: int) -> list[Transaction]:
+    """Today's missing rows go out before older days, so the live count can match the sheet."""
+    base = (
+        Transaction.objects.filter(status="COMPLETED", type__in=["DEPOSIT", "WITHDRAW"], brand__is_active=True)
+        .exclude(sheet_exports__slot=slot)
+        .select_related("brand")
+    )
+    today = sydney_today()
+    current = list(base.filter(txn_date=today).order_by("created_at", "id")[:limit])
+    if len(current) >= limit:
+        return current
+    older = list(
+        base.exclude(txn_date=today).order_by("txn_date", "created_at", "id")[: limit - len(current)]
+    )
+    return current + older
 
 
 def _open_spreadsheet(sheet_id: str):

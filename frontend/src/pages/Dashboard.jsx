@@ -60,7 +60,15 @@ const WIDGETS = [
 ];
 
 function emptySheets() {
-  return [1, 2, 3].map((slot) => ({ slot, sheet_url: "", sheet_name: "", blocked: false }));
+  return [1, 2, 3].map((slot) => ({
+    slot,
+    sheet_url: "",
+    sheet_name: "",
+    blocked: false,
+    auto_sync: true,
+    deposit_start_row: "105",
+    withdraw_start_row: "1000",
+  }));
 }
 
 function sheetsFromStatus(sheet) {
@@ -73,10 +81,21 @@ function sheetsFromStatus(sheet) {
         sheet_url: found.sheet_url || "",
         sheet_name: found.sheet_name || "",
         blocked: Boolean(found.blocked),
+        auto_sync: found.auto_sync !== false,
+        deposit_start_row: String(found.deposit_start_row || 105),
+        withdraw_start_row: String(found.withdraw_start_row || 1000),
       };
     }
     if (blank.slot === 1) {
-      return { slot: 1, sheet_url: sheet?.sheet_url || "", sheet_name: sheet?.sheet_name || "", blocked: Boolean(sheet?.blocked) };
+      return {
+        slot: 1,
+        sheet_url: sheet?.sheet_url || "",
+        sheet_name: sheet?.sheet_name || "",
+        blocked: Boolean(sheet?.blocked),
+        auto_sync: sheet?.auto_sync !== false,
+        deposit_start_row: String(sheet?.deposit_start_row || 105),
+        withdraw_start_row: String(sheet?.withdraw_start_row || 1000),
+      };
     }
     return blank;
   });
@@ -95,14 +114,13 @@ export default function Dashboard() {
   const [brands, setBrands] = useState([]);
   const [group] = useState("All");
   const [sheets, setSheets] = useState(() => emptySheets());
-  const [depositStart, setDepositStart] = useState("105");
-  const [withdrawStart, setWithdrawStart] = useState("1024");
+  const [rowsBusy, setRowsBusy] = useState(0);
   const [sheetNote, setSheetNote] = useState("");
   const [sheetNoteOk, setSheetNoteOk] = useState(false);
   const [sheetBusy, setSheetBusy] = useState(0);
   const [sheetSyncing, setSheetSyncing] = useState(0);
   const [sheetBlocking, setSheetBlocking] = useState(0);
-  const [rowsBusy, setRowsBusy] = useState(false);
+  const [sheetAuto, setSheetAuto] = useState(0);
   const [tallying, setTallying] = useState(false);
   const [brand, setBrand] = useState("All");
   const [date, setDate] = useState(today);
@@ -128,33 +146,40 @@ export default function Dashboard() {
     api("/api/google-sheet/")
       .then((sheet) => {
         setSheets(sheetsFromStatus(sheet));
-        setDepositStart(String(sheet.deposit_start_row || 105));
-        setWithdrawStart(String(sheet.withdraw_start_row || 1024));
         setSheetNote(sheet.last_error || "");
         setSheetNoteOk(!sheet.last_error);
       })
       .catch(() => {});
   }, []);
 
-  async function saveStartRows(event) {
+  function updateSheetRow(slot, field, value) {
+    setSheets((current) => current.map((item) => (item.slot === slot ? { ...item, [field]: value.replace(/[^\d]/g, "") } : item)));
+  }
+
+  async function saveStartRows(event, slot) {
     event.preventDefault();
-    setRowsBusy(true);
+    const current = sheets.find((item) => item.slot === slot);
+    setRowsBusy(slot);
     setSheetNote("");
     setSheetNoteOk(false);
     try {
       const saved = await api("/api/google-sheet/", {
         method: "POST",
-        body: { deposit_start_row: depositStart.trim(), withdraw_start_row: withdrawStart.trim() },
+        body: {
+          slot,
+          deposit_start_row: String(current?.deposit_start_row || "105").trim(),
+          withdraw_start_row: String(current?.withdraw_start_row || "1000").trim(),
+        },
       });
-      setDepositStart(String(saved.deposit_start_row));
-      setWithdrawStart(String(saved.withdraw_start_row));
-      setSheetNote(`Saved. Deposits start at row ${saved.deposit_start_row}. Withdrawals start at row ${saved.withdraw_start_row}.`);
+      setSheets(sheetsFromStatus(saved));
+      const savedSheet = (saved.sheets || []).find((item) => item.slot === slot) || saved;
+      setSheetNote(`Saved Google Sheet ${slot}. Deposits start at row ${savedSheet.deposit_start_row}. Withdrawals start at row ${savedSheet.withdraw_start_row}.`);
       setSheetNoteOk(true);
     } catch (err) {
       setSheetNote(err.message);
       setSheetNoteOk(false);
     } finally {
-      setRowsBusy(false);
+      setRowsBusy(0);
     }
   }
 
@@ -171,6 +196,25 @@ export default function Dashboard() {
       setSheetNoteOk(false);
     } finally {
       setSheetSyncing(0);
+    }
+  }
+
+  async function setAutoSync(slot, enabled) {
+    setSheetAuto(slot);
+    setSheetNote("");
+    setSheetNoteOk(false);
+    try {
+      const saved = await api("/api/google-sheet/auto-sync/", { method: "POST", body: { slot, auto_sync: enabled } });
+      setSheets(sheetsFromStatus(saved));
+      setSheetNote(enabled
+        ? `Google Sheet ${slot} Auto Sync is on. New transactions are written as they arrive.`
+        : `Google Sheet ${slot} Auto Sync is off. Use Sync with Google Sheet to send transactions.`);
+      setSheetNoteOk(true);
+    } catch (err) {
+      setSheetNote(err.message);
+      setSheetNoteOk(false);
+    } finally {
+      setSheetAuto(0);
     }
   }
 
@@ -345,13 +389,15 @@ export default function Dashboard() {
   const windowRange = useVisibleRows(tableScroll, rows.length, ROW_HEIGHT);
   const visibleRows = rows.slice(windowRange.start, windowRange.end);
 
-  const depositNumber = Number(depositStart);
-  const withdrawNumber = Number(withdrawStart);
-  const startRowsValid = Number.isInteger(depositNumber)
-    && Number.isInteger(withdrawNumber)
-    && depositNumber >= 2
-    && withdrawNumber <= 1000000
-    && depositNumber < withdrawNumber;
+  function rowNumbersValid(sheet) {
+    const depositNumber = Number(sheet.deposit_start_row);
+    const withdrawNumber = Number(sheet.withdraw_start_row);
+    return Number.isInteger(depositNumber)
+      && Number.isInteger(withdrawNumber)
+      && depositNumber >= 2
+      && withdrawNumber <= 1000000
+      && depositNumber < withdrawNumber;
+  }
   const viewStatus = friendlyStatus(live, refreshing, data);
   const dayCount = Number(bucket(stats, "row_count").count) || 0;
   const completedIn = bucket(stats, "completed_deposit");
@@ -371,7 +417,7 @@ export default function Dashboard() {
     <div className="writer">
       {sheets.map((sheet) => {
         const link = sheet.sheet_url.trim();
-        const busyHere = sheetBusy === sheet.slot || sheetSyncing === sheet.slot || sheetBlocking === sheet.slot;
+        const busyHere = sheetBusy === sheet.slot || sheetSyncing === sheet.slot || sheetBlocking === sheet.slot || sheetAuto === sheet.slot;
         return (
           <form
             key={sheet.slot}
@@ -383,7 +429,7 @@ export default function Dashboard() {
                 {sheet.sheet_name ? <strong className="sheet-heading">{sheet.sheet_name}</strong> : null}
                 <span>Google Sheet {sheet.slot}</span>
               </label>
-              <span>{sheet.blocked ? "Writing paused" : "Day tab · Staff stays untouched"}</span>
+              <span>{sheet.blocked ? "Writing paused" : sheet.auto_sync ? "Auto Sync on · writes as transactions arrive" : "Auto Sync off · manual sync only"}</span>
             </div>
             <div className="sheet-url-row">
               <input
@@ -405,10 +451,19 @@ export default function Dashboard() {
                 type="button"
                 className="sheet-sync"
                 onClick={() => syncSheet(sheet.slot)}
-                disabled={busyHere || sheetBusy !== 0 || sheetSyncing !== 0 || rowsBusy || tallying || !link}
+                disabled={busyHere || sheetBusy !== 0 || sheetSyncing !== 0 || rowsBusy !== 0 || tallying || !link}
                 aria-busy={sheetSyncing === sheet.slot}
               >
                 {sheetSyncing === sheet.slot ? "Syncing…" : "Sync with Google Sheet"}
+              </button>
+              <button
+                type="button"
+                className={sheet.auto_sync ? "sheet-auto on" : "sheet-auto off"}
+                onClick={() => setAutoSync(sheet.slot, !sheet.auto_sync)}
+                disabled={busyHere || sheetAuto !== 0 || !link}
+                aria-pressed={sheet.auto_sync}
+              >
+                {sheetAuto === sheet.slot ? "Saving…" : sheet.auto_sync ? "Auto Sync : ON" : "Auto Sync : OFF"}
               </button>
               <button
                 type="button"
@@ -419,43 +474,49 @@ export default function Dashboard() {
                 {sheetBlocking === sheet.slot ? "Saving…" : sheet.blocked ? "Unblock Sheet" : "Block Sheet"}
               </button>
             </div>
+            <div className="sheet-starts">
+              <label className={rowNumbersValid(sheet) ? "" : "is-invalid"}>
+                Deposits from
+                <input
+                  inputMode="numeric"
+                  aria-label={`Google Sheet ${sheet.slot} deposit start row`}
+                  value={sheet.deposit_start_row}
+                  disabled={sheet.blocked}
+                  onChange={(event) => updateSheetRow(sheet.slot, "deposit_start_row", event.target.value)}
+                />
+              </label>
+              <label className={rowNumbersValid(sheet) ? "" : "is-invalid"}>
+                Withdrawals from
+                <input
+                  inputMode="numeric"
+                  aria-label={`Google Sheet ${sheet.slot} withdraw start row`}
+                  value={sheet.withdraw_start_row}
+                  disabled={sheet.blocked}
+                  onChange={(event) => updateSheetRow(sheet.slot, "withdraw_start_row", event.target.value)}
+                />
+              </label>
+              <button type="button" onClick={(event) => saveStartRows(event, sheet.slot)} disabled={sheet.blocked || rowsBusy !== 0 || sheetSyncing !== 0 || tallying || !rowNumbersValid(sheet)}>
+                {rowsBusy === sheet.slot ? "Saving…" : "Save rows"}
+              </button>
+              <p className="sheet-start-hint">
+                {rowNumbersValid(sheet)
+                  ? `Deposits use empty rows ${Number(sheet.deposit_start_row)}–${Number(sheet.withdraw_start_row) - 1}. Withdrawals start at ${Number(sheet.withdraw_start_row)}.`
+                  : "Enter whole numbers from 2 to 1000000. Deposits must start above withdrawals."}
+              </p>
+            </div>
           </form>
         );
       })}
-      <form className="sheet-starts" onSubmit={saveStartRows}>
-        <label className={startRowsValid ? "" : "is-invalid"}>
-          Deposits from
-          <input
-            inputMode="numeric"
-            aria-label="Deposit start row"
-            value={depositStart}
-            onChange={(event) => setDepositStart(event.target.value.replace(/[^\d]/g, ""))}
-          />
-        </label>
-        <label className={startRowsValid ? "" : "is-invalid"}>
-          Withdrawals from
-          <input
-            inputMode="numeric"
-            aria-label="Withdraw start row"
-            value={withdrawStart}
-            onChange={(event) => setWithdrawStart(event.target.value.replace(/[^\d]/g, ""))}
-          />
-        </label>
-        <button type="submit" disabled={rowsBusy || sheetSyncing !== 0 || tallying || !startRowsValid}>{rowsBusy ? "Saving…" : "Save rows"}</button>
+      <form className="sheet-starts" onSubmit={(event) => event.preventDefault()}>
         <button
           type="button"
           className="sheet-tally"
           onClick={tallyBanks}
-          disabled={tallying || sheetSyncing !== 0 || rowsBusy || sheetBusy !== 0}
+          disabled={tallying || sheetSyncing !== 0 || rowsBusy !== 0 || sheetBusy !== 0}
           aria-busy={tallying}
         >
           Tally System Banks
         </button>
-        <p className="sheet-start-hint">
-          {startRowsValid
-            ? `Deposits use empty rows ${depositNumber}–${withdrawNumber - 1}. Withdrawals start at ${withdrawNumber}.`
-            : "Enter whole numbers from 2 to 1000000. Deposits must start above withdrawals."}
-        </p>
       </form>
       {sheetNote && (
         <p className={sheetNoteOk ? "sheet-url-note is-ok" : "sheet-url-note is-error"} role="status">

@@ -9,6 +9,7 @@ from brands.views import (
     BrandListView,
     CustomersView,
     DashboardView,
+    GoogleSheetAutoSyncView,
     GoogleSheetBlockView,
     GoogleSheetSyncView,
     GoogleSheetView,
@@ -30,6 +31,7 @@ urlpatterns = [
     path("sync/", SyncView.as_view()),
     path("google-sheet/", GoogleSheetView.as_view()),
     path("google-sheet/block/", GoogleSheetBlockView.as_view()),
+    path("google-sheet/auto-sync/", GoogleSheetAutoSyncView.as_view()),
     path("google-sheet/sync/", GoogleSheetSyncView.as_view()),
     path("banks/tally/", TallySystemBanksView.as_view()),
 ]

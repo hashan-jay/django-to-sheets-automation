@@ -171,6 +171,14 @@ button {
   background: #92400e;
 }
 
+.sheet-url button.sheet-auto.on {
+  background: #0f766e;
+}
+
+.sheet-url button.sheet-auto.off {
+  background: #b91c1c;
+}
+
 .sheet-url button.sheet-unblock {
   background: #1d4ed8;
 }
