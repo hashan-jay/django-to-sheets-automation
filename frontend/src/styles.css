@@ -79,11 +79,23 @@ button {
   gap: 12px;
   margin: 0;
   max-width: none;
-  padding: 14px 14px 12px;
-  border: 1px solid #e4ebf2;
-  border-radius: 18px;
-  background: #fff;
-  box-shadow: 0 8px 24px rgba(15, 39, 68, 0.04);
+  padding: 16px;
+  border: 1px solid rgba(15, 39, 68, 0.08);
+  border-radius: 20px;
+  background:
+    linear-gradient(180deg, rgba(240, 253, 250, 0.7), #fff 72px);
+  box-shadow: 0 10px 30px rgba(15, 39, 68, 0.05);
+  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+}
+
+.sheet-url:hover {
+  transform: translateY(-1px);
+  border-color: rgba(15, 118, 110, 0.28);
+  box-shadow: 0 16px 36px rgba(15, 39, 68, 0.08);
+}
+
+.sheet-url.is-blocked {
+  background: linear-gradient(180deg, #f3f5f7, #fff 72px);
 }
 
 .sheet-url.is-blocked .sheet-url-row {
@@ -108,10 +120,45 @@ button {
   align-items: baseline;
 }
 
-.writer-label span {
+.sheet-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 5px 10px;
+  border-radius: 999px;
   font-size: 12px;
-  font-weight: 600;
-  color: var(--muted);
+  font-weight: 700;
+  color: #0f766e;
+  background: #ecfdf5;
+}
+
+.sheet-status::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.sheet-status.live::before {
+  box-shadow: 0 0 0 0 rgba(15, 118, 110, 0.6);
+  animation: sheet-pulse 1.8s ease-out infinite;
+}
+
+.sheet-status.manual {
+  color: #b91c1c;
+  background: #fef2f2;
+}
+
+.sheet-status.paused {
+  color: #64748b;
+  background: #eef2f6;
+}
+
+@keyframes sheet-pulse {
+  70% { box-shadow: 0 0 0 6px rgba(15, 118, 110, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(15, 118, 110, 0); }
 }
 
 .sheet-heading {
@@ -156,10 +203,16 @@ button {
   height: 42px;
   border: 1px solid #d5dee8;
   border-radius: 12px;
-  background: #f8fafc;
+  background: #fff;
   color: var(--ink);
   padding: 0 14px;
   outline: none;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.sheet-url-row input:focus {
+  border-color: #0f766e;
+  box-shadow: 0 0 0 4px rgba(15, 118, 110, 0.14);
 }
 
 .sheet-url-row button {
@@ -171,6 +224,12 @@ button {
   background: #0f766e;
   color: #fff;
   font-weight: 700;
+  transition: transform 140ms ease, filter 140ms ease;
+}
+
+.sheet-url-row button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: brightness(1.06);
 }
 
 .sheet-url-row button.sheet-sync {
@@ -286,6 +345,12 @@ button {
   background: #0f766e;
   color: #fff;
   font-weight: 700;
+  transition: transform 140ms ease, filter 140ms ease;
+}
+
+.sheet-starts button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: brightness(1.06);
 }
 
 .sheet-starts button.sheet-sync {

@@ -429,7 +429,7 @@ export default function Dashboard() {
                 {sheet.sheet_name ? <strong className="sheet-heading">{sheet.sheet_name}</strong> : null}
                 <span>Google Sheet {sheet.slot}</span>
               </label>
-              <span>{sheet.blocked ? "Writing paused" : sheet.auto_sync ? "Auto Sync on · writes as transactions arrive" : "Auto Sync off · manual sync only"}</span>
+              <span className={sheet.blocked ? "sheet-status paused" : sheet.auto_sync ? "sheet-status live" : "sheet-status manual"}>{sheet.blocked ? "Writing paused" : sheet.auto_sync ? "Auto Sync on" : "Manual sync only"}</span>
             </div>
             <div className="sheet-url-row">
               <input
