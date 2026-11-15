@@ -130,6 +130,7 @@ export default function Dashboard() {
   const [sheetWrites, setSheetWrites] = useState("");
   const [tallying, setTallying] = useState(false);
   const [brand, setBrand] = useState("All");
+  const [statsBrand, setStatsBrand] = useState("All");
   const [date, setDate] = useState(today);
   const [type, setType] = useState("All types");
   const [status, setStatus] = useState("All statuses");
@@ -393,17 +394,21 @@ export default function Dashboard() {
     }
   }
 
-  const stats = data?.stats || EMPTY_STATS;
+  const stats = useMemo(() => {
+    if (statsBrand === "All") return data?.stats || EMPTY_STATS;
+    if (data?.stats_by_brand?.[statsBrand]) return data.stats_by_brand[statsBrand];
+    return statsFromRows((data?.rows || []).filter((row) => row.brand === statsBrand));
+  }, [data, statsBrand]);
   const pulse = useStatPulse(stats);
   const previewKey = focus;
   const previewRows = useMemo(() => {
     if (!previewKey) return [];
     return (data?.rows || [])
-      .filter((row) => matchesWidget(row, previewKey))
+      .filter((row) => (statsBrand === "All" || row.brand === statsBrand) && matchesWidget(row, previewKey))
       .slice()
       .sort((left, right) => compareText(right.time, left.time))
       .slice(0, 5);
-  }, [data, previewKey]);
+  }, [data, previewKey, statsBrand]);
   const rows = useMemo(() => {
     const source = (data?.rows || []).filter((row) => (focus ? matchesWidget(row, focus) : passesDropdown(row, status, type)) && matchesQuery(row, query));
     return sortRows(source, sortBy);
@@ -703,8 +708,21 @@ export default function Dashboard() {
             <div>
               <h3>Statistics</h3>
               <p>
-                {scopeLabel(group, brand)} · {date} · {Number(bucket(stats, "row_count").count).toLocaleString()} transactions
+                {statsBrand === "All" ? scopeLabel(group, brand) : statsBrand} · {date} · {Number(bucket(stats, "row_count").count).toLocaleString()} transactions
               </p>
+              <label className="stats-brand">
+                Brand
+                <select
+                  aria-label="Statistics brand"
+                  value={statsBrand}
+                  onChange={(event) => setStatsBrand(event.target.value)}
+                >
+                  <option value="All">All brands</option>
+                  {visibleBrands.map((item) => (
+                    <option key={item.id} value={item.name}>{item.name}</option>
+                  ))}
+                </select>
+              </label>
             </div>
             <button
               type="button"
@@ -1622,6 +1640,36 @@ function ledgerCardValue(row, key, kind) {
 
 function bankIsActive(row) {
   return row?.activity === "Active";
+}
+
+function statsFromRows(rows) {
+  const totals = {
+    pending_deposit: [0, 0],
+    pending_withdraw: [0, 0],
+    completed_deposit: [0, 0],
+    completed_withdraw: [0, 0],
+    bonus: [0, 0],
+    forfeited: [0, 0],
+    processing: [0, 0],
+    rejected: [0, 0],
+    other: [0, 0],
+  };
+  for (const row of rows) {
+    const key = rowBucket(row);
+    const bucketTotals = totals[key] || totals.other;
+    bucketTotals[0] += 1;
+    bucketTotals[1] += cents(row.amount);
+  }
+  const stats = {};
+  for (const [key, [count, amount]] of Object.entries(totals)) {
+    stats[key] = { count, amount: fromCents(amount) };
+  }
+  stats.net_completed = {
+    count: totals.completed_deposit[0] + totals.completed_withdraw[0],
+    amount: fromCents(totals.completed_deposit[1] + totals.completed_withdraw[1]),
+  };
+  stats.row_count = { count: rows.length, amount: "0.00" };
+  return stats;
 }
 
 function scopeLabel(group, brand) {

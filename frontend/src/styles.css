@@ -1406,6 +1406,27 @@ td.bank-name, td.bank-account, td.payment-method { font-weight: 700; color: #0f2
   margin-bottom: 12px;
 }
 
+.stats-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  color: #0a1628;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.stats-brand select {
+  height: 36px;
+  min-width: 180px;
+  border: 1px solid #d5dee8;
+  border-radius: 10px;
+  background: #fff;
+  color: #0a1628;
+  padding: 0 10px;
+  font-weight: 700;
+}
+
 .stats-head p, .stats-net span {
   margin: 2px 0 0;
   color: #5b6b7c;

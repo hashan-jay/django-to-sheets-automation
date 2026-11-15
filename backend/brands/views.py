@@ -394,6 +394,10 @@ def _dashboard_body(
             allowed = set()
         rows = [row for row in rows if row.get("brand") in allowed]
         brands_meta = [item for item in brands_meta if item.get("name") in allowed]
+    by_brand: dict[str, list] = {}
+    for row in rows:
+        by_brand.setdefault(row.get("brand") or "", []).append(row)
+    stats_by_brand = {name: _stats_rows(items) for name, items in by_brand.items() if name}
     if brand_name != "All":
         scoped = [row for row in rows if row.get("brand") == brand_name]
         meta = [item for item in brands_meta if item.get("name") == brand_name]
@@ -453,6 +457,7 @@ def _dashboard_body(
         "brand": brand_name,
         "rows": visible,
         "stats": _stats_rows(scoped),
+        "stats_by_brand": stats_by_brand,
         "brand_summary": brand_summary,
         "brand_line": brand_line,
         "status_line": status_line,
