@@ -1392,10 +1392,13 @@ td.bank-name, td.bank-account, td.payment-method { font-weight: 700; color: #0f2
 
 .stats {
   margin-top: 16px;
-  background: #f8fafc;
+  background:
+    radial-gradient(1200px 180px at 100% 0%, rgba(15, 118, 110, 0.08), transparent 50%),
+    #f8fafc;
   border: 1px solid var(--line);
-  border-radius: 16px;
+  border-radius: 20px;
   padding: 16px;
+  box-shadow: 0 10px 30px rgba(15, 39, 68, 0.04);
 }
 
 .stats-head {
@@ -1560,19 +1563,34 @@ button.stats-net.is-live strong {
   width: 100%;
   text-align: left;
   color: inherit;
-  background: #fff;
+  background: linear-gradient(180deg, #fff 0%, #fbfcfe 100%);
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 16px;
   padding: 14px 14px 14px 18px;
   box-shadow: 0 1px 2px rgba(15, 39, 68, 0.04);
-  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease, opacity 160ms ease;
+  transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease, opacity 180ms ease;
+}
+
+.widget::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 -40%;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.7), transparent);
+  transform: translateX(-120%);
+  pointer-events: none;
 }
 
 .widget:hover,
 .widget.is-hot {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 18px rgba(15, 39, 68, 0.1);
+  transform: translateY(-3px);
+  box-shadow: 0 14px 28px color-mix(in srgb, var(--accent, #0f766e) 18%, transparent);
   border-color: var(--accent, #0f766e);
+}
+
+.widget:hover::after,
+.widget.is-hot::after {
+  animation: widget-sheen 700ms ease;
 }
 
 .widget.is-live .widget-amount {
@@ -1585,12 +1603,23 @@ button.stats-net.is-live strong {
   100% { transform: scale(1); }
 }
 
+@keyframes widget-sheen {
+  to { transform: translateX(320%); }
+}
+
 .widget:active { transform: translateY(0); }
 
 .widget.selected {
   border-color: var(--accent, #0f766e);
-  background: color-mix(in srgb, var(--accent, #0f766e) 8%, #fff);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent, #0f766e) 24%, transparent);
+  background: color-mix(in srgb, var(--accent, #0f766e) 10%, #fff);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--accent, #0f766e) 22%, transparent),
+    0 12px 24px color-mix(in srgb, var(--accent, #0f766e) 16%, transparent);
+}
+
+.widget.selected .widget-label,
+.widget:hover .widget-label {
+  color: var(--accent, #0f766e);
 }
 
 .widgets.filtering .widget:not(.selected) { opacity: 0.62; }
@@ -1667,6 +1696,7 @@ button.stats-net.is-live strong {
   height: 100%;
   border-radius: inherit;
   background: var(--accent, #94a3b8);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent, #94a3b8) 45%, transparent);
   transition: width 400ms ease;
 }
 
@@ -1754,7 +1784,8 @@ button.stats-net.is-live strong {
 @media (prefers-reduced-motion: reduce) {
   .widget.is-live .widget-amount,
   button.stats-net.is-live strong,
-  .widget-meter > span {
+  .widget-meter > span,
+  .widget::after {
     animation: none;
     transition: none;
   }
