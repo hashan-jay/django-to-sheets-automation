@@ -281,11 +281,19 @@ def _sync_brands_for_day(day, slot: int) -> dict:
     title = str(day.day)
     worksheet = next((item for item in spreadsheet.worksheets() if str(item.title).strip() == title), None)
     removed = (
-        _remove_uncompleted(worksheet, day, slot, _enabled_types(row))
+        _remove_uncompleted(
+            worksheet,
+            day,
+            slot,
+            _enabled_types(row),
+            row.withdraw_start_row or DEFAULT_WITHDRAW_START,
+            row.deposits_enabled,
+            row.withdrawals_enabled,
+        )
         if worksheet is not None and not _sheet_is_locked(worksheet)
         else 0
     )
-    _write_payment_methods(spreadsheet, day)
+    _write_payment_methods(spreadsheet, day, _enabled_types(row), row.withdraw_start_row or DEFAULT_WITHDRAW_START)
     written, errors = _write_cashbook(
         spreadsheet,
         pending,
@@ -558,12 +566,12 @@ def _write_cashbook(
         try:
             ids = worksheet.col_values(7)
             existing = _cashbook_ids(worksheet)
-            _clear_duplicate_ids(worksheet, ids)
+            _clear_duplicate_ids(worksheet, ids, withdraw_start, write_deposits, write_withdrawals)
             deposit_choices = _bank_dropdown(worksheet, deposit_start)
             withdraw_choices = _bank_dropdown(worksheet, withdraw_start) or deposit_choices
             _copy_owner_validation(worksheet)
             owner_choices = _owner_dropdown(worksheet)
-            _clear_blank_category(worksheet, ids)
+            _clear_blank_category(worksheet, ids, withdraw_start, write_deposits, write_withdrawals)
             seen: set[str] = set()
             unique_items: list[Transaction] = []
             for item in items:
@@ -582,11 +590,12 @@ def _write_cashbook(
             deposits = [item for item in fresh if item.type != "WITHDRAW"] if write_deposits else []
             withdraws = [item for item in fresh if item.type == "WITHDRAW"] if write_withdrawals else []
             placed = _write_block(worksheet, ids, deposits, deposit_start, deposit_end, deposit_choices, owner_choices)
-            needed_rows = withdraw_start + len(withdraws) + 5
-            if worksheet.row_count < needed_rows:
-                worksheet.add_rows(needed_rows - worksheet.row_count)
-            withdraw_end = max(worksheet.row_count, needed_rows)
-            placed += _write_block(worksheet, ids, withdraws, withdraw_start, withdraw_end, withdraw_choices, owner_choices)
+            if write_withdrawals and withdraws:
+                needed_rows = withdraw_start + len(withdraws) + 5
+                if worksheet.row_count < needed_rows:
+                    worksheet.add_rows(needed_rows - worksheet.row_count)
+                withdraw_end = max(worksheet.row_count, needed_rows)
+                placed += _write_block(worksheet, ids, withdraws, withdraw_start, withdraw_end, withdraw_choices, owner_choices)
             _remember(placed, slot)
             written.extend(already)
             written.extend(placed)
@@ -603,7 +612,22 @@ def _write_cashbook(
     return written, errors
 
 
-def _remove_uncompleted(worksheet, day, slot: int, types: list[str] | None = None) -> int:
+def _row_is_held(index: int, withdraw_start: int, write_deposits: bool, write_withdrawals: bool) -> bool:
+    """A disabled deposit or withdrawal block is left exactly as the user left it."""
+    if index >= int(withdraw_start):
+        return not write_withdrawals
+    return not write_deposits
+
+
+def _remove_uncompleted(
+    worksheet,
+    day,
+    slot: int,
+    types: list[str] | None = None,
+    withdraw_start: int = DEFAULT_WITHDRAW_START,
+    write_deposits: bool = True,
+    write_withdrawals: bool = True,
+) -> int:
     """Clear cashbook rows whose transaction is a deposit or withdrawal that is not completed."""
     allowed = types if types is not None else ["DEPOSIT", "WITHDRAW"]
     if not allowed:
@@ -619,7 +643,7 @@ def _remove_uncompleted(worksheet, day, slot: int, types: list[str] | None = Non
     cleared: list[str] = []
     for index, value in enumerate(worksheet.col_values(7), start=1):
         txn_id = str(value).strip()
-        if txn_id not in unwanted:
+        if txn_id not in unwanted or _row_is_held(index, withdraw_start, write_deposits, write_withdrawals):
             continue
         ranges.append({"range": f"B{index}:J{index}", "values": [["", "", "", "", "", "", "", "", ""]]})
         cleared.append(txn_id)
@@ -636,13 +660,16 @@ def _remove_uncompleted(worksheet, day, slot: int, types: list[str] | None = Non
     return len(cleared)
 
 
-def _write_payment_methods(spreadsheet, day) -> int:
+def _write_payment_methods(spreadsheet, day, types: list[str] | None = None, withdraw_start: int = DEFAULT_WITHDRAW_START) -> int:
     """Put the payment method in Bank for completed rows that have no bank account."""
+    allowed = types if types is not None else ["DEPOSIT", "WITHDRAW"]
+    if not allowed:
+        return 0
     items = list(
         Transaction.objects.filter(
             txn_date=day,
             status="COMPLETED",
-            type__in=["DEPOSIT", "WITHDRAW"],
+            type__in=allowed,
             bank_name="",
             bank_account_name="",
         )
@@ -665,6 +692,8 @@ def _write_payment_methods(spreadsheet, day) -> int:
         slot = positions.get(item.external_id)
         if slot is None:
             continue
+        if _row_is_held(slot, withdraw_start, "DEPOSIT" in allowed, "WITHDRAW" in allowed):
+            continue
         ranges.append({"range": f"C{slot}", "values": [[_match_bank(item.method.strip(), _bank_dropdown(worksheet))]]})
     for offset in range(0, len(ranges), 200):
         chunk = ranges[offset : offset + 200]
@@ -684,13 +713,21 @@ def _cashbook_ids(worksheet) -> set[str]:
     return found
 
 
-def _clear_duplicate_ids(worksheet, id_column: list[str]) -> None:
+def _clear_duplicate_ids(
+    worksheet,
+    id_column: list[str],
+    withdraw_start: int = DEFAULT_WITHDRAW_START,
+    write_deposits: bool = True,
+    write_withdrawals: bool = True,
+) -> None:
     """Blank a later cashbook row when its transaction id is already on an earlier row."""
     seen: dict[str, int] = {}
     ranges = []
     for index, value in enumerate(id_column, start=1):
         txn_id = str(value).strip()
         if not txn_id or not txn_id.isdigit():
+            continue
+        if _row_is_held(index, withdraw_start, write_deposits, write_withdrawals):
             continue
         if txn_id in seen:
             ranges.append({"range": f"B{index}:J{index}", "values": [["", "", "", "", "", "", "", "", ""]]})
@@ -811,7 +848,7 @@ def patch_gateway_banks() -> int:
                 type__in=["DEPOSIT", "WITHDRAW"],
             )
             .exclude(method="")
-            .only("external_id", "method", "txn_date")
+            .only("external_id", "method", "txn_date", "type")
             if is_gateway_method(item.method)
         ]
         if not items:
@@ -823,7 +860,12 @@ def patch_gateway_banks() -> int:
             grouped: dict[str, list[Transaction]] = {}
             for item in items:
                 grouped.setdefault(_tab_name(item), []).append(item)
-            updated += _patch_gateway_tabs(tabs, grouped)
+            allowed = set(_enabled_types(row))
+            grouped = {
+                title: [item for item in group if item.type in allowed]
+                for title, group in grouped.items()
+            }
+            updated += _patch_gateway_tabs(tabs, grouped, row.withdraw_start_row or DEFAULT_WITHDRAW_START, allowed)
         return updated
     except Exception as exc:
         message = str(exc).splitlines()[0][:500]
@@ -833,7 +875,7 @@ def patch_gateway_banks() -> int:
         _lock.release()
 
 
-def _patch_gateway_tabs(tabs, grouped: dict[str, list[Transaction]]) -> int:
+def _patch_gateway_tabs(tabs, grouped: dict[str, list[Transaction]], withdraw_start: int = DEFAULT_WITHDRAW_START, allowed: set[str] | None = None) -> int:
     updated = 0
     for title, group in grouped.items():
         worksheet = tabs.get(title)
@@ -853,6 +895,8 @@ def _patch_gateway_tabs(tabs, grouped: dict[str, list[Transaction]]) -> int:
             if found is None:
                 continue
             row_number, current = found
+            if _row_is_held(row_number, withdraw_start, allowed is None or "DEPOSIT" in allowed, allowed is None or "WITHDRAW" in allowed):
+                continue
             method = item.method.strip()
             matched = _match_bank(method, choices)
             if not matched or current == matched:
@@ -1161,12 +1205,18 @@ def _copy_owner_validation(worksheet) -> None:
         log.warning("Company Owner dropdown update failed: %s", str(exc).splitlines()[0][:300])
 
 
-def _clear_blank_category(worksheet, id_column: list[str]) -> None:
+def _clear_blank_category(
+    worksheet,
+    id_column: list[str],
+    withdraw_start: int = DEFAULT_WITHDRAW_START,
+    write_deposits: bool = True,
+    write_withdrawals: bool = True,
+) -> None:
     """A blank written into the Category dropdown is rejected. Remove only those blanks."""
     categories = worksheet.col_values(9)
     targets = []
     for index, txn in enumerate(id_column, start=1):
-        if not str(txn).strip().isdigit():
+        if not str(txn).strip().isdigit() or _row_is_held(index, withdraw_start, write_deposits, write_withdrawals):
             continue
         if index - 1 >= len(categories):
             break
@@ -1255,9 +1305,12 @@ def repair_written_columns() -> int:
                 if key and key not in positions:
                     positions[key] = index
             ranges = []
+            held_withdraw = row.withdraw_start_row or DEFAULT_WITHDRAW_START
             for item in items:
                 row_number = positions.get(item.external_id)
                 if row_number is None:
+                    continue
+                if _row_is_held(row_number, held_withdraw, row.deposits_enabled, row.withdrawals_enabled):
                     continue
                 ranges.append(
                     {

@@ -1406,25 +1406,67 @@ td.bank-name, td.bank-account, td.payment-method { font-weight: 700; color: #0f2
   margin-bottom: 12px;
 }
 
+.stats-head-side {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-left: auto;
+}
+
 .stats-brand {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 8px;
-  color: #0a1628;
-  font-size: 12px;
+  height: 44px;
+  margin: 0;
+  padding: 0 6px 0 14px;
+  border: 1px solid #d5dee8;
+  border-radius: 999px;
+  background: #fff;
+  color: #64748b;
+  font-size: 11px;
   font-weight: 750;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  box-shadow: 0 1px 2px rgba(10, 22, 40, 0.04);
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.stats-brand:hover {
+  border-color: #99f6e4;
+  box-shadow: 0 8px 20px rgba(15, 118, 110, 0.12);
+  transform: translateY(-1px);
+}
+
+.stats-brand:focus-within {
+  border-color: #0f766e;
+  box-shadow: 0 0 0 4px rgba(15, 118, 110, 0.16);
+}
+
+.stats-brand.is-filtered {
+  border-color: #0f766e;
+  background: #f0fdfa;
+  color: #0f766e;
 }
 
 .stats-brand select {
-  height: 36px;
-  min-width: 180px;
-  border: 1px solid #d5dee8;
-  border-radius: 10px;
-  background: #fff;
+  height: 32px;
+  min-width: 168px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
   color: #0a1628;
-  padding: 0 10px;
-  font-weight: 700;
+  padding: 0 8px;
+  font-size: 13px;
+  font-weight: 750;
+  letter-spacing: 0;
+  text-transform: none;
+  cursor: pointer;
+}
+
+.stats-brand select:focus {
+  outline: none;
 }
 
 .stats-head p, .stats-net span {
@@ -2458,6 +2500,7 @@ body.modal-open {
   .users-head { align-items: flex-start; flex-direction: column; }
   .topbar { align-items: flex-start; flex-direction: column; }
   .stats-head { align-items: flex-start; flex-direction: column; }
+  .stats-head-side { margin-left: 0; width: 100%; justify-content: space-between; flex-wrap: wrap; }
   .stats-net { text-align: left; }
   .table-wrap { max-height: 60vh; }
 }

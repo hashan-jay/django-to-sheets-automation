@@ -710,7 +710,9 @@ export default function Dashboard() {
               <p>
                 {statsBrand === "All" ? scopeLabel(group, brand) : statsBrand} · {date} · {Number(bucket(stats, "row_count").count).toLocaleString()} transactions
               </p>
-              <label className="stats-brand">
+            </div>
+            <div className="stats-head-side">
+              <label className={`stats-brand${statsBrand !== "All" ? " is-filtered" : ""}`}>
                 Brand
                 <select
                   aria-label="Statistics brand"
@@ -723,7 +725,6 @@ export default function Dashboard() {
                   ))}
                 </select>
               </label>
-            </div>
             <button
               type="button"
               className={`stats-net${focus === "net_completed" ? " selected" : ""}${pulse.net_completed ? " is-live" : ""}`}
@@ -744,6 +745,7 @@ export default function Dashboard() {
                 <span className="down">Out {money(completedOut.amount)}</span>
               </span>
             </button>
+            </div>
           </div>
           <p className="stats-hint">
             {focusTitle ? (
