@@ -859,16 +859,39 @@ def _bank_tokens(text: str) -> tuple[str, ...]:
 _BANK_SUFFIXES = {"au", "nz", "uk", "us", "sg"}
 
 
+def _one_letter_apart(left: str, right: str) -> bool:
+    """True when two longer words differ by a single added, removed, or changed letter.
+
+    SOLUTIONS and SOLUTION are the same word for dropdown matching. Short codes such as NAB are not guessed.
+    """
+    if abs(len(left) - len(right)) > 1 or len(left) < 5 or len(right) < 5:
+        return False
+    if len(left) == len(right):
+        return sum(a != b for a, b in zip(left, right)) == 1
+    longer, shorter = (left, right) if len(left) > len(right) else (right, left)
+    index = 0
+    skipped = False
+    for character in longer:
+        if index < len(shorter) and character == shorter[index]:
+            index += 1
+            continue
+        if skipped:
+            return False
+        skipped = True
+    return True
+
+
 def _token_gap(left: str, right: str) -> int | None:
-    """0 when the words are the same. A small gap when one is the other plus a country code, as in ING and INGAU."""
+    """0 when the words are the same. A small gap for a country code, as in ING and INGAU, or one different letter."""
     if left == right:
         return 0
     longer, shorter = (left, right) if len(left) >= len(right) else (right, left)
-    if len(shorter) < 2 or not longer.startswith(shorter):
-        return None
-    extra = longer[len(shorter) :]
-    if extra in _BANK_SUFFIXES:
-        return len(extra)
+    if len(shorter) >= 2 and longer.startswith(shorter):
+        extra = longer[len(shorter) :]
+        if extra in _BANK_SUFFIXES:
+            return len(extra)
+    if _one_letter_apart(left, right):
+        return 1
     return None
 
 
@@ -891,6 +914,8 @@ def _dropdown_score(label: str, choice: str) -> int | None:
             return None
         score += best
         choice_tokens.pop(found)
+    if score > 2:
+        return None
     return score
 
 
