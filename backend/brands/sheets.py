@@ -747,6 +747,7 @@ def _patch_gateway_tabs(tabs, grouped: dict[str, list[Transaction]]) -> int:
                 continue
             current = str(cells[0]).strip() if cells else ""
             positions[txn_id] = (index, current)
+        choices = _bank_dropdown(worksheet)
         ranges = []
         for item in group:
             found = positions.get(item.external_id)
@@ -754,9 +755,10 @@ def _patch_gateway_tabs(tabs, grouped: dict[str, list[Transaction]]) -> int:
                 continue
             row_number, current = found
             method = item.method.strip()
-            if not method or current == method:
+            matched = _match_bank(method, choices)
+            if not matched or current == matched:
                 continue
-            ranges.append({"range": f"C{row_number}", "values": [[_match_bank(method, _bank_dropdown(worksheet))]]})
+            ranges.append({"range": f"C{row_number}", "values": [[matched]]})
         for offset in range(0, len(ranges), 200):
             chunk = ranges[offset : offset + 200]
             if chunk:
