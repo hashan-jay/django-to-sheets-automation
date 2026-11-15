@@ -285,6 +285,25 @@ button {
   color: #b45309;
 }
 
+.sheet-row-pair {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sheet-starts button.row-write {
+  background: #fff;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+  min-width: 84px;
+}
+
+.sheet-starts button.row-write.is-stopped {
+  background: #b91c1c;
+  color: #fff;
+  border: 0;
+}
+
 .sheet-starts {
   display: flex;
   flex-wrap: wrap;

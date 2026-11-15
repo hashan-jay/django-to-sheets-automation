@@ -255,6 +255,8 @@ class GoogleSheetSetting(models.Model):
     auto_sync = models.BooleanField(default=True)
     deposit_start_row = models.PositiveIntegerField(default=105)
     withdraw_start_row = models.PositiveIntegerField(default=1000)
+    deposits_enabled = models.BooleanField(default=True)
+    withdrawals_enabled = models.BooleanField(default=True)
     last_error = models.TextField(blank=True)
     last_written_at = models.DateTimeField(null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)

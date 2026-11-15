@@ -68,6 +68,8 @@ function emptySheets() {
     auto_sync: true,
     deposit_start_row: "105",
     withdraw_start_row: "1000",
+    deposits_enabled: true,
+    withdrawals_enabled: true,
   }));
 }
 
@@ -84,6 +86,8 @@ function sheetsFromStatus(sheet) {
         auto_sync: found.auto_sync !== false,
         deposit_start_row: String(found.deposit_start_row || 105),
         withdraw_start_row: String(found.withdraw_start_row || 1000),
+        deposits_enabled: found.deposits_enabled !== false,
+        withdrawals_enabled: found.withdrawals_enabled !== false,
       };
     }
     if (blank.slot === 1) {
@@ -95,6 +99,8 @@ function sheetsFromStatus(sheet) {
         auto_sync: sheet?.auto_sync !== false,
         deposit_start_row: String(sheet?.deposit_start_row || 105),
         withdraw_start_row: String(sheet?.withdraw_start_row || 1000),
+        deposits_enabled: sheet?.deposits_enabled !== false,
+        withdrawals_enabled: sheet?.withdrawals_enabled !== false,
       };
     }
     return blank;
@@ -121,6 +127,7 @@ export default function Dashboard() {
   const [sheetSyncing, setSheetSyncing] = useState(0);
   const [sheetBlocking, setSheetBlocking] = useState(0);
   const [sheetAuto, setSheetAuto] = useState(0);
+  const [sheetWrites, setSheetWrites] = useState("");
   const [tallying, setTallying] = useState(false);
   const [brand, setBrand] = useState("All");
   const [date, setDate] = useState(today);
@@ -215,6 +222,29 @@ export default function Dashboard() {
       setSheetNoteOk(false);
     } finally {
       setSheetAuto(0);
+    }
+  }
+
+  async function setRowWriting(slot, kind, enabled) {
+    setSheetWrites(`${slot}-${kind}`);
+    setSheetNote("");
+    setSheetNoteOk(false);
+    const body = { slot };
+    if (kind === "deposits") body.deposits_enabled = enabled;
+    else body.withdrawals_enabled = enabled;
+    const label = kind === "deposits" ? "Deposits" : "Withdrawals";
+    try {
+      const saved = await api("/api/google-sheet/writes/", { method: "POST", body });
+      setSheets(sheetsFromStatus(saved));
+      setSheetNote(enabled
+        ? `${label} on Google Sheet ${slot} will be written again.`
+        : `${label} on Google Sheet ${slot} are disabled. No new ${label.toLowerCase()} will be written to that sheet.`);
+      setSheetNoteOk(true);
+    } catch (err) {
+      setSheetNote(err.message);
+      setSheetNoteOk(false);
+    } finally {
+      setSheetWrites("");
     }
   }
 
@@ -510,32 +540,54 @@ export default function Dashboard() {
               </button>
             </div>
             <div className="sheet-starts">
-              <label className={rowNumbersValid(sheet) ? "" : "is-invalid"}>
-                Deposits from
-                <input
-                  inputMode="numeric"
-                  aria-label={`Google Sheet ${sheet.slot} deposit start row`}
-                  value={sheet.deposit_start_row}
-                  disabled={sheet.blocked}
-                  onChange={(event) => updateSheetRow(sheet.slot, "deposit_start_row", event.target.value)}
-                />
-              </label>
-              <label className={rowNumbersValid(sheet) ? "" : "is-invalid"}>
-                Withdrawals from
-                <input
-                  inputMode="numeric"
-                  aria-label={`Google Sheet ${sheet.slot} withdraw start row`}
-                  value={sheet.withdraw_start_row}
-                  disabled={sheet.blocked}
-                  onChange={(event) => updateSheetRow(sheet.slot, "withdraw_start_row", event.target.value)}
-                />
-              </label>
+              <div className="sheet-row-pair">
+                <button
+                  type="button"
+                  className={sheet.deposits_enabled ? "row-write" : "row-write is-stopped"}
+                  onClick={() => setRowWriting(sheet.slot, "deposits", !sheet.deposits_enabled)}
+                  disabled={sheetWrites !== "" || !link}
+                  aria-pressed={!sheet.deposits_enabled}
+                >
+                  {sheetWrites === `${sheet.slot}-deposits` ? "Saving…" : sheet.deposits_enabled ? "Disable" : "Enable"}
+                </button>
+                <label className={rowNumbersValid(sheet) ? "" : "is-invalid"}>
+                  Deposits from
+                  <input
+                    inputMode="numeric"
+                    aria-label={`Google Sheet ${sheet.slot} deposit start row`}
+                    value={sheet.deposit_start_row}
+                    disabled={sheet.blocked}
+                    onChange={(event) => updateSheetRow(sheet.slot, "deposit_start_row", event.target.value)}
+                  />
+                </label>
+              </div>
+              <div className="sheet-row-pair">
+                <button
+                  type="button"
+                  className={sheet.withdrawals_enabled ? "row-write" : "row-write is-stopped"}
+                  onClick={() => setRowWriting(sheet.slot, "withdrawals", !sheet.withdrawals_enabled)}
+                  disabled={sheetWrites !== "" || !link}
+                  aria-pressed={!sheet.withdrawals_enabled}
+                >
+                  {sheetWrites === `${sheet.slot}-withdrawals` ? "Saving…" : sheet.withdrawals_enabled ? "Disable" : "Enable"}
+                </button>
+                <label className={rowNumbersValid(sheet) ? "" : "is-invalid"}>
+                  Withdrawals from
+                  <input
+                    inputMode="numeric"
+                    aria-label={`Google Sheet ${sheet.slot} withdraw start row`}
+                    value={sheet.withdraw_start_row}
+                    disabled={sheet.blocked}
+                    onChange={(event) => updateSheetRow(sheet.slot, "withdraw_start_row", event.target.value)}
+                  />
+                </label>
+              </div>
               <button type="button" onClick={(event) => saveStartRows(event, sheet.slot)} disabled={sheet.blocked || rowsBusy !== 0 || sheetSyncing !== 0 || tallying || !rowNumbersValid(sheet)}>
                 {rowsBusy === sheet.slot ? "Saving…" : "Save rows"}
               </button>
               <p className="sheet-start-hint">
                 {rowNumbersValid(sheet)
-                  ? `Deposits use empty rows ${Number(sheet.deposit_start_row)}–${Number(sheet.withdraw_start_row) - 1}. Withdrawals start at ${Number(sheet.withdraw_start_row)}.`
+                  ? `${sheet.deposits_enabled ? `Deposits use empty rows ${Number(sheet.deposit_start_row)}–${Number(sheet.withdraw_start_row) - 1}` : "Deposits are disabled"}. ${sheet.withdrawals_enabled ? `Withdrawals start at ${Number(sheet.withdraw_start_row)}` : "Withdrawals are disabled"}.`
                   : "Enter whole numbers from 2 to 1000000. Deposits must start above withdrawals."}
               </p>
             </div>

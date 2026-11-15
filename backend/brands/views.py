@@ -17,6 +17,7 @@ from brands.sheets import (
     save_start_rows,
     set_sheet_auto_sync,
     set_sheet_blocked,
+    set_sheet_writes,
     sync_brands_for_day,
 )
 from brands.services import (
@@ -88,6 +89,21 @@ class GoogleSheetAutoSyncView(APIView):
     def post(self, request):
         try:
             set_sheet_auto_sync(request.data.get("slot") or 1, request.data.get("auto_sync"))
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=400)
+        return Response(public_status())
+
+
+class GoogleSheetWritesView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        try:
+            set_sheet_writes(
+                request.data.get("slot") or 1,
+                request.data.get("deposits_enabled") if "deposits_enabled" in request.data else None,
+                request.data.get("withdrawals_enabled") if "withdrawals_enabled" in request.data else None,
+            )
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=400)
         return Response(public_status())

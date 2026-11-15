@@ -23,7 +23,11 @@ log = logging.getLogger("django")
 _SHEET_URL_RE = re.compile(r"/spreadsheets/d/([a-zA-Z0-9-_]+)")
 _GID_RE = re.compile(r"[?#&]gid=(\d+)")
 _lock = threading.Lock()
+_book_lock = threading.Lock()
 _wake = threading.Event()
+_gspread_client = None
+_open_books: dict[str, tuple[object, float]] = {}
+_quota_pause_until = 0.0
 _gateway_patch = threading.Event()
 _writer_started = False
 _writer_guard = threading.Lock()
@@ -172,6 +176,24 @@ def save_start_rows(deposit_raw, withdraw_raw, slot_raw=1) -> GoogleSheetSetting
     return row
 
 
+def set_sheet_writes(slot_raw, deposits_raw=None, withdrawals_raw=None) -> GoogleSheetSetting:
+    """Turn new deposit rows or new withdrawal rows off for one spreadsheet only."""
+    slot = _slot_number(slot_raw)
+    row = sheet_setting(slot)
+    fields = ["last_error", "updated_at"]
+    if deposits_raw is not None:
+        row.deposits_enabled = deposits_raw is True or str(deposits_raw).strip().lower() in {"1", "true", "yes", "on"}
+        fields.append("deposits_enabled")
+    if withdrawals_raw is not None:
+        row.withdrawals_enabled = withdrawals_raw is True or str(withdrawals_raw).strip().lower() in {"1", "true", "yes", "on"}
+        fields.append("withdrawals_enabled")
+    if len(fields) == 2:
+        raise ValueError("Choose deposits or withdrawals.")
+    row.last_error = ""
+    row.save(update_fields=fields)
+    return row
+
+
 def _sheet_public(row: GoogleSheetSetting) -> dict:
     return {
         "slot": row.slot,
@@ -182,6 +204,8 @@ def _sheet_public(row: GoogleSheetSetting) -> dict:
         "auto_sync": bool(row.auto_sync),
         "deposit_start_row": row.deposit_start_row or DEFAULT_DEPOSIT_START,
         "withdraw_start_row": row.withdraw_start_row or DEFAULT_WITHDRAW_START,
+        "deposits_enabled": bool(row.deposits_enabled),
+        "withdrawals_enabled": bool(row.withdrawals_enabled),
         "sheet_id": normalize_google_sheet_id(row.sheet_url),
         "last_error": row.last_error,
         "last_written_at": row.last_written_at.isoformat() if row.last_written_at else "",
@@ -210,6 +234,7 @@ def _fill_missing_sheet_names() -> None:
 
 def public_status() -> dict:
     ensure_sheet_slots()
+    GoogleSheetSetting.objects.filter(last_error__contains="Quota exceeded").update(last_error="")
     _fill_missing_sheet_names()
     row = sheet_setting(1)
     sheets = [_sheet_public(item) for item in GoogleSheetSetting.objects.filter(slot__in=SHEET_SLOTS).order_by("slot")]
@@ -246,7 +271,7 @@ def _sync_brands_for_day(day, slot: int) -> dict:
         Transaction.objects.filter(
             txn_date=day,
             status="COMPLETED",
-            type__in=["DEPOSIT", "WITHDRAW"],
+            type__in=_enabled_types(row),
             brand__is_active=True,
         )
         .select_related("brand")
@@ -255,7 +280,11 @@ def _sync_brands_for_day(day, slot: int) -> dict:
     spreadsheet = _open_spreadsheet(sheet_id)
     title = str(day.day)
     worksheet = next((item for item in spreadsheet.worksheets() if str(item.title).strip() == title), None)
-    removed = _remove_uncompleted(worksheet, day, slot) if worksheet is not None and not _sheet_is_locked(worksheet) else 0
+    removed = (
+        _remove_uncompleted(worksheet, day, slot, _enabled_types(row))
+        if worksheet is not None and not _sheet_is_locked(worksheet)
+        else 0
+    )
     _write_payment_methods(spreadsheet, day)
     written, errors = _write_cashbook(
         spreadsheet,
@@ -263,6 +292,8 @@ def _sync_brands_for_day(day, slot: int) -> dict:
         row.deposit_start_row or DEFAULT_DEPOSIT_START,
         row.withdraw_start_row or DEFAULT_WITHDRAW_START,
         slot,
+        write_deposits=row.deposits_enabled,
+        write_withdrawals=row.withdrawals_enabled,
     )
     if worksheet is not None:
         worksheet = next((item for item in spreadsheet.worksheets() if str(item.title).strip() == title), None)
@@ -280,6 +311,13 @@ def _sync_brands_for_day(day, slot: int) -> dict:
         detail += f" Removed {removed} rows that were not completed."
     if errors:
         detail = f"{detail} {' '.join(errors)}"
+    held = []
+    if not row.deposits_enabled:
+        held.append("deposits")
+    if not row.withdrawals_enabled:
+        held.append("withdrawals")
+    if held:
+        detail += f" No new {' or '.join(held)} were written because that writing is disabled."
     GoogleSheetSetting.objects.filter(pk=row.pk).update(
         last_error="" if sheet_count == database_count and not errors else detail[:500],
         last_written_at=timezone.now() if written else row.last_written_at,
@@ -329,6 +367,7 @@ def _writer_loop() -> None:
                     continue
                 if count == 0:
                     break
+                time.sleep(3)
             if _gateway_patch.is_set():
                 _gateway_patch.clear()
                 patch_gateway_banks()
@@ -344,6 +383,8 @@ def export_pending(limit: int = 200, slot=None) -> int:
     Returns the number written, 0 when nothing is waiting, or -1 when another
     sheet write is already in progress. Pass slot to write only that sheet.
     """
+    if time.monotonic() < _quota_pause_until:
+        return 0
     if not _lock.acquire(blocking=False):
         return -1
     try:
@@ -362,29 +403,49 @@ def _export_pending(limit: int, only_slot: int | None = None) -> int:
     for row in sheets:
         deposit_start = row.deposit_start_row or DEFAULT_DEPOSIT_START
         withdraw_start = row.withdraw_start_row or DEFAULT_WITHDRAW_START
-        pending = _pending_for_sheet(row.slot, limit)
+        pending = _pending_for_sheet(row.slot, limit, _enabled_types(row))
         if not pending:
             continue
         try:
             spreadsheet = _open_spreadsheet(normalize_google_sheet_id(row.sheet_url))
-            written, errors = _write_cashbook(spreadsheet, pending, deposit_start, withdraw_start, row.slot)
+            written, errors = _write_cashbook(
+                spreadsheet,
+                pending,
+                deposit_start,
+                withdraw_start,
+                row.slot,
+                write_deposits=row.deposits_enabled,
+                write_withdrawals=row.withdrawals_enabled,
+            )
         except Exception as exc:
-            message = str(exc).splitlines()[0][:500]
+            message = _sheet_error(exc)
             log.warning("%s write failed: %s", sheet_label(row.slot), message)
             GoogleSheetSetting.objects.filter(pk=row.pk).update(last_error=message)
             continue
         GoogleSheetSetting.objects.filter(pk=row.pk).update(
-            last_error=" ".join(errors)[:500],
+            last_error=_sheet_error(" ".join(errors))[:500],
             last_written_at=timezone.now() if written else row.last_written_at,
         )
         written_total += len(written)
     return written_total
 
 
-def _pending_for_sheet(slot: int, limit: int) -> list[Transaction]:
+def _enabled_types(row: GoogleSheetSetting) -> list[str]:
+    types = []
+    if row.deposits_enabled:
+        types.append("DEPOSIT")
+    if row.withdrawals_enabled:
+        types.append("WITHDRAW")
+    return types
+
+
+def _pending_for_sheet(slot: int, limit: int, types: list[str] | None = None) -> list[Transaction]:
     """Today's missing rows go out before older days, so the live count can match the sheet."""
+    allowed = types if types is not None else ["DEPOSIT", "WITHDRAW"]
+    if not allowed:
+        return []
     base = (
-        Transaction.objects.filter(status="COMPLETED", type__in=["DEPOSIT", "WITHDRAW"], brand__is_active=True)
+        Transaction.objects.filter(status="COMPLETED", type__in=allowed, brand__is_active=True)
         .exclude(sheet_exports__slot=slot)
         .select_related("brand")
     )
@@ -427,13 +488,40 @@ def _sheet_is_locked(worksheet) -> bool:
     return int(worksheet.id) in _locked_sheet_ids(worksheet.spreadsheet)
 
 
+def _quota_paused() -> bool:
+    return time.monotonic() < _quota_pause_until
+
+
+def _pause_for_quota() -> None:
+    global _quota_pause_until
+    _quota_pause_until = time.monotonic() + 70
+
+
+def _sheet_error(exc: object) -> str:
+    """Hide Google's one-minute read limit. Writing continues when the minute passes."""
+    message = str(exc).splitlines()[0][:500] if not isinstance(exc, str) else exc
+    if "Quota exceeded" in message or "[429]" in message:
+        _pause_for_quota()
+        return ""
+    return message
+
+
 def _open_spreadsheet(sheet_id: str):
+    global _gspread_client
     if not CREDENTIALS.is_file():
         raise FileNotFoundError(f"Service account key is missing: {CREDENTIALS}")
     import gspread
 
-    client = gspread.service_account(filename=str(CREDENTIALS))
-    return client.open_by_key(sheet_id)
+    now = time.monotonic()
+    with _book_lock:
+        cached = _open_books.get(sheet_id)
+        if cached and now - cached[1] < 600:
+            return cached[0]
+        if _gspread_client is None:
+            _gspread_client = gspread.service_account(filename=str(CREDENTIALS))
+        book = _gspread_client.open_by_key(sheet_id)
+        _open_books[sheet_id] = (book, now)
+        return book
 
 
 def _write_cashbook(
@@ -442,6 +530,8 @@ def _write_cashbook(
     deposit_start: int = DEFAULT_DEPOSIT_START,
     withdraw_start: int = DEFAULT_WITHDRAW_START,
     slot: int = 1,
+    write_deposits: bool = True,
+    write_withdrawals: bool = True,
 ) -> tuple[list[Transaction], list[str]]:
     """Finance cashbook: tab name is the transaction date's day number.
 
@@ -484,11 +574,13 @@ def _write_cashbook(
             already = [item for item in unique_items if item.external_id in existing]
             fresh = [item for item in unique_items if item.external_id not in existing]
             _remember(already, slot)
-            _align_existing_banks(worksheet, [item for item in already if item.type != "WITHDRAW"], deposit_choices)
-            _align_existing_banks(worksheet, [item for item in already if item.type == "WITHDRAW"], withdraw_choices)
-            _align_existing_owners(worksheet, already, owner_choices)
-            deposits = [item for item in fresh if item.type != "WITHDRAW"]
-            withdraws = [item for item in fresh if item.type == "WITHDRAW"]
+            deposit_already = [item for item in already if item.type != "WITHDRAW"] if write_deposits else []
+            withdraw_already = [item for item in already if item.type == "WITHDRAW"] if write_withdrawals else []
+            _align_existing_banks(worksheet, deposit_already, deposit_choices)
+            _align_existing_banks(worksheet, withdraw_already, withdraw_choices)
+            _align_existing_owners(worksheet, deposit_already + withdraw_already, owner_choices)
+            deposits = [item for item in fresh if item.type != "WITHDRAW"] if write_deposits else []
+            withdraws = [item for item in fresh if item.type == "WITHDRAW"] if write_withdrawals else []
             placed = _write_block(worksheet, ids, deposits, deposit_start, deposit_end, deposit_choices, owner_choices)
             needed_rows = withdraw_start + len(withdraws) + 5
             if worksheet.row_count < needed_rows:
@@ -498,19 +590,26 @@ def _write_cashbook(
             _remember(placed, slot)
             written.extend(already)
             written.extend(placed)
-            left = len(fresh) - len(placed)
+            left = (len(deposits) + len(withdraws)) - len(placed)
             if left:
                 errors.append(f"Tab {title} ran out of empty rows for {left} transaction(s).")
         except Exception as exc:
-            errors.append(f"Tab {title}: {str(exc).splitlines()[0][:180]}")
+            message = _sheet_error(exc)
+            if message:
+                errors.append(f"Tab {title}: {message[:180]}")
             log.warning("Google Sheet tab %s failed: %s", title, exc)
+            if _quota_paused():
+                break
     return written, errors
 
 
-def _remove_uncompleted(worksheet, day, slot: int) -> int:
+def _remove_uncompleted(worksheet, day, slot: int, types: list[str] | None = None) -> int:
     """Clear cashbook rows whose transaction is a deposit or withdrawal that is not completed."""
+    allowed = types if types is not None else ["DEPOSIT", "WITHDRAW"]
+    if not allowed:
+        return 0
     unwanted = set(
-        Transaction.objects.filter(txn_date=day, type__in=["DEPOSIT", "WITHDRAW"])
+        Transaction.objects.filter(txn_date=day, type__in=allowed)
         .exclude(status="COMPLETED")
         .values_list("external_id", flat=True)
     )
