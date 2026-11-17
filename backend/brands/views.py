@@ -48,6 +48,8 @@ class GoogleSheetView(APIView):
                     request.data.get("deposit_start_row"),
                     request.data.get("withdraw_start_row"),
                     request.data.get("slot") or 1,
+                    request.data.get("deposit_end_row"),
+                    request.data.get("withdraw_end_row"),
                 )
             else:
                 save_sheet_url(str(request.data.get("sheet_url") or ""), request.data.get("slot") or 1)

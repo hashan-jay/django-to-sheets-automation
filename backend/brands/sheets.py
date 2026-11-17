@@ -153,7 +153,20 @@ def set_sheet_auto_sync(slot_raw, enabled_raw) -> GoogleSheetSetting:
     return row
 
 
-def save_start_rows(deposit_raw, withdraw_raw, slot_raw=1) -> GoogleSheetSetting:
+def _optional_row(raw, label: str) -> int:
+    text = str(raw if raw is not None else "").strip()
+    if not text:
+        return 0
+    try:
+        number = int(text)
+    except (TypeError, ValueError):
+        raise ValueError(f"Enter a whole number for the {label} row.")
+    if number < MIN_SHEET_START_ROW or number > MAX_SHEET_START_ROW:
+        raise ValueError(f"Enter a {label} row between 2 and 1000000.")
+    return number
+
+
+def save_start_rows(deposit_raw, withdraw_raw, slot_raw=1, deposit_end_raw=None, withdraw_end_raw=None) -> GoogleSheetSetting:
     """Same bounds as finance-automation: deposits must start before withdrawals."""
     try:
         deposit = int(str(deposit_raw).strip())
@@ -168,11 +181,19 @@ def save_start_rows(deposit_raw, withdraw_raw, slot_raw=1) -> GoogleSheetSetting
         raise ValueError(
             f"Deposits must start before withdrawals. Deposit row is {deposit} and withdraw row is {withdraw}."
         )
+    deposit_end = _optional_row(deposit_end_raw, "deposit end")
+    withdraw_end = _optional_row(withdraw_end_raw, "withdraw end")
+    if deposit_end and (deposit_end < deposit or deposit_end >= withdraw):
+        raise ValueError("The deposit end row must be from the deposit start through the row before withdrawals.")
+    if withdraw_end and withdraw_end < withdraw:
+        raise ValueError("The withdrawal end row must be the withdrawal start row or a row below it.")
     row = sheet_setting(_slot_number(slot_raw))
     row.deposit_start_row = deposit
+    row.deposit_end_row = deposit_end
     row.withdraw_start_row = withdraw
+    row.withdraw_end_row = withdraw_end
     row.last_error = ""
-    row.save(update_fields=["deposit_start_row", "withdraw_start_row", "last_error", "updated_at"])
+    row.save(update_fields=["deposit_start_row", "deposit_end_row", "withdraw_start_row", "withdraw_end_row", "last_error", "updated_at"])
     return row
 
 
@@ -203,7 +224,9 @@ def _sheet_public(row: GoogleSheetSetting) -> dict:
         "blocked": bool(row.blocked),
         "auto_sync": bool(row.auto_sync),
         "deposit_start_row": row.deposit_start_row or DEFAULT_DEPOSIT_START,
+        "deposit_end_row": row.deposit_end_row or 0,
         "withdraw_start_row": row.withdraw_start_row or DEFAULT_WITHDRAW_START,
+        "withdraw_end_row": row.withdraw_end_row or 0,
         "deposits_enabled": bool(row.deposits_enabled),
         "withdrawals_enabled": bool(row.withdrawals_enabled),
         "sheet_id": normalize_google_sheet_id(row.sheet_url),
@@ -290,11 +313,20 @@ def _sync_brands_for_day(day, slot: int) -> dict:
             row.withdraw_start_row or DEFAULT_WITHDRAW_START,
             row.deposits_enabled,
             row.withdrawals_enabled,
+            row.deposit_end_row or 0,
+            row.withdraw_end_row or 0,
         )
         if worksheet is not None and not _sheet_is_locked(worksheet)
         else 0
     )
-    _write_payment_methods(spreadsheet, day, _enabled_types(row), row.withdraw_start_row or DEFAULT_WITHDRAW_START)
+    _write_payment_methods(
+        spreadsheet,
+        day,
+        _enabled_types(row),
+        row.withdraw_start_row or DEFAULT_WITHDRAW_START,
+        row.deposit_end_row or 0,
+        row.withdraw_end_row or 0,
+    )
     written, errors = _write_cashbook(
         spreadsheet,
         pending,
@@ -303,6 +335,8 @@ def _sync_brands_for_day(day, slot: int) -> dict:
         slot,
         write_deposits=row.deposits_enabled,
         write_withdrawals=row.withdrawals_enabled,
+        deposit_end=row.deposit_end_row or 0,
+        withdraw_end=row.withdraw_end_row or 0,
     )
     if worksheet is not None:
         worksheet = next((item for item in _worksheets(spreadsheet) if str(item.title).strip() == title), None)
@@ -425,6 +459,8 @@ def _export_pending(limit: int, only_slot: int | None = None) -> int:
                 row.slot,
                 write_deposits=row.deposits_enabled,
                 write_withdrawals=row.withdrawals_enabled,
+                deposit_end=row.deposit_end_row or 0,
+                withdraw_end=row.withdraw_end_row or 0,
             )
         except Exception as exc:
             message = _sheet_error(exc)
@@ -552,6 +588,8 @@ def _write_cashbook(
     slot: int = 1,
     write_deposits: bool = True,
     write_withdrawals: bool = True,
+    deposit_end: int = 0,
+    withdraw_end: int = 0,
 ) -> tuple[list[Transaction], list[str]]:
     """Finance cashbook: tab name is the transaction date's day number.
 
@@ -561,7 +599,9 @@ def _write_cashbook(
     """
     deposit_start = int(deposit_start)
     withdraw_start = int(withdraw_start)
-    deposit_end = withdraw_start - 1
+    deposit_limit = int(deposit_end or 0)
+    deposit_end = withdraw_start - 1 if deposit_limit < deposit_start else min(deposit_limit, withdraw_start - 1)
+    withdraw_limit = int(withdraw_end or 0)
     tabs = {str(worksheet.title).strip(): worksheet for worksheet in _worksheets(spreadsheet)}
     grouped: dict[str, list[Transaction]] = {}
     for item in pending:
@@ -578,12 +618,12 @@ def _write_cashbook(
         try:
             ids = worksheet.col_values(7)
             existing = _cashbook_ids(worksheet)
-            _clear_duplicate_ids(worksheet, ids, withdraw_start, write_deposits, write_withdrawals)
+            _clear_duplicate_ids(worksheet, ids, withdraw_start, write_deposits, write_withdrawals, deposit_end, withdraw_limit)
             deposit_choices = _bank_dropdown(worksheet, deposit_start)
             withdraw_choices = _bank_dropdown(worksheet, withdraw_start) or deposit_choices
             _copy_owner_validation(worksheet)
             owner_choices = _owner_dropdown(worksheet)
-            _clear_blank_category(worksheet, ids, withdraw_start, write_deposits, write_withdrawals)
+            _clear_blank_category(worksheet, ids, withdraw_start, write_deposits, write_withdrawals, deposit_end, withdraw_limit)
             seen: set[str] = set()
             unique_items: list[Transaction] = []
             for item in items:
@@ -603,11 +643,14 @@ def _write_cashbook(
             withdraws = [item for item in fresh if item.type == "WITHDRAW"] if write_withdrawals else []
             placed = _write_block(worksheet, ids, deposits, deposit_start, deposit_end, deposit_choices, owner_choices)
             if write_withdrawals and withdraws:
-                needed_rows = withdraw_start + len(withdraws) + 5
-                if worksheet.row_count < needed_rows:
-                    worksheet.add_rows(needed_rows - worksheet.row_count)
-                withdraw_end = max(worksheet.row_count, needed_rows)
-                placed += _write_block(worksheet, ids, withdraws, withdraw_start, withdraw_end, withdraw_choices, owner_choices)
+                if withdraw_limit >= withdraw_start:
+                    withdraw_last = withdraw_limit
+                else:
+                    needed_rows = withdraw_start + len(withdraws) + 5
+                    if worksheet.row_count < needed_rows:
+                        worksheet.add_rows(needed_rows - worksheet.row_count)
+                    withdraw_last = max(worksheet.row_count, needed_rows)
+                placed += _write_block(worksheet, ids, withdraws, withdraw_start, withdraw_last, withdraw_choices, owner_choices)
             _remember(placed, slot)
             written.extend(already)
             written.extend(placed)
@@ -624,9 +667,21 @@ def _write_cashbook(
     return written, errors
 
 
-def _row_is_held(index: int, withdraw_start: int, write_deposits: bool, write_withdrawals: bool) -> bool:
-    """A disabled deposit or withdrawal block is left exactly as the user left it."""
-    if index >= int(withdraw_start):
+def _row_is_held(
+    index: int,
+    withdraw_start: int,
+    write_deposits: bool,
+    write_withdrawals: bool,
+    deposit_end: int = 0,
+    withdraw_end: int = 0,
+) -> bool:
+    """Rows outside the saved deposit or withdrawal block are left as the user left them."""
+    start = int(withdraw_start)
+    if deposit_end and int(deposit_end) < index < start:
+        return True
+    if withdraw_end and index > int(withdraw_end):
+        return True
+    if index >= start:
         return not write_withdrawals
     return not write_deposits
 
@@ -639,6 +694,8 @@ def _remove_uncompleted(
     withdraw_start: int = DEFAULT_WITHDRAW_START,
     write_deposits: bool = True,
     write_withdrawals: bool = True,
+    deposit_end: int = 0,
+    withdraw_end: int = 0,
 ) -> int:
     """Clear cashbook rows whose transaction is a deposit or withdrawal that is not completed."""
     allowed = types if types is not None else ["DEPOSIT", "WITHDRAW"]
@@ -655,7 +712,7 @@ def _remove_uncompleted(
     cleared: list[str] = []
     for index, value in enumerate(worksheet.col_values(7), start=1):
         txn_id = str(value).strip()
-        if txn_id not in unwanted or _row_is_held(index, withdraw_start, write_deposits, write_withdrawals):
+        if txn_id not in unwanted or _row_is_held(index, withdraw_start, write_deposits, write_withdrawals, deposit_end, withdraw_end):
             continue
         ranges.append({"range": f"B{index}:J{index}", "values": [["", "", "", "", "", "", "", "", ""]]})
         cleared.append(txn_id)
@@ -672,7 +729,14 @@ def _remove_uncompleted(
     return len(cleared)
 
 
-def _write_payment_methods(spreadsheet, day, types: list[str] | None = None, withdraw_start: int = DEFAULT_WITHDRAW_START) -> int:
+def _write_payment_methods(
+    spreadsheet,
+    day,
+    types: list[str] | None = None,
+    withdraw_start: int = DEFAULT_WITHDRAW_START,
+    deposit_end: int = 0,
+    withdraw_end: int = 0,
+) -> int:
     """Put the payment method in Bank for completed rows that have no bank account."""
     allowed = types if types is not None else ["DEPOSIT", "WITHDRAW"]
     if not allowed:
@@ -704,7 +768,7 @@ def _write_payment_methods(spreadsheet, day, types: list[str] | None = None, wit
         slot = positions.get(item.external_id)
         if slot is None:
             continue
-        if _row_is_held(slot, withdraw_start, "DEPOSIT" in allowed, "WITHDRAW" in allowed):
+        if _row_is_held(slot, withdraw_start, "DEPOSIT" in allowed, "WITHDRAW" in allowed, deposit_end, withdraw_end):
             continue
         ranges.append({"range": f"C{slot}", "values": [[_match_bank(item.method.strip(), _bank_dropdown(worksheet))]]})
     for offset in range(0, len(ranges), 200):
@@ -731,6 +795,8 @@ def _clear_duplicate_ids(
     withdraw_start: int = DEFAULT_WITHDRAW_START,
     write_deposits: bool = True,
     write_withdrawals: bool = True,
+    deposit_end: int = 0,
+    withdraw_end: int = 0,
 ) -> None:
     """Blank a later cashbook row when its transaction id is already on an earlier row."""
     seen: dict[str, int] = {}
@@ -739,7 +805,7 @@ def _clear_duplicate_ids(
         txn_id = str(value).strip()
         if not txn_id or not txn_id.isdigit():
             continue
-        if _row_is_held(index, withdraw_start, write_deposits, write_withdrawals):
+        if _row_is_held(index, withdraw_start, write_deposits, write_withdrawals, deposit_end, withdraw_end):
             continue
         if txn_id in seen:
             ranges.append({"range": f"B{index}:J{index}", "values": [["", "", "", "", "", "", "", "", ""]]})
@@ -877,7 +943,14 @@ def patch_gateway_banks() -> int:
                 title: [item for item in group if item.type in allowed]
                 for title, group in grouped.items()
             }
-            updated += _patch_gateway_tabs(tabs, grouped, row.withdraw_start_row or DEFAULT_WITHDRAW_START, allowed)
+            updated += _patch_gateway_tabs(
+                tabs,
+                grouped,
+                row.withdraw_start_row or DEFAULT_WITHDRAW_START,
+                allowed,
+                row.deposit_end_row or 0,
+                row.withdraw_end_row or 0,
+            )
         return updated
     except Exception as exc:
         message = str(exc).splitlines()[0][:500]
@@ -887,7 +960,7 @@ def patch_gateway_banks() -> int:
         _lock.release()
 
 
-def _patch_gateway_tabs(tabs, grouped: dict[str, list[Transaction]], withdraw_start: int = DEFAULT_WITHDRAW_START, allowed: set[str] | None = None) -> int:
+def _patch_gateway_tabs(tabs, grouped: dict[str, list[Transaction]], withdraw_start: int = DEFAULT_WITHDRAW_START, allowed: set[str] | None = None, deposit_end: int = 0, withdraw_end: int = 0) -> int:
     updated = 0
     for title, group in grouped.items():
         worksheet = tabs.get(title)
@@ -907,7 +980,7 @@ def _patch_gateway_tabs(tabs, grouped: dict[str, list[Transaction]], withdraw_st
             if found is None:
                 continue
             row_number, current = found
-            if _row_is_held(row_number, withdraw_start, allowed is None or "DEPOSIT" in allowed, allowed is None or "WITHDRAW" in allowed):
+            if _row_is_held(row_number, withdraw_start, allowed is None or "DEPOSIT" in allowed, allowed is None or "WITHDRAW" in allowed, deposit_end, withdraw_end):
                 continue
             method = item.method.strip()
             matched = _match_bank(method, choices)
@@ -1223,12 +1296,14 @@ def _clear_blank_category(
     withdraw_start: int = DEFAULT_WITHDRAW_START,
     write_deposits: bool = True,
     write_withdrawals: bool = True,
+    deposit_end: int = 0,
+    withdraw_end: int = 0,
 ) -> None:
     """A blank written into the Category dropdown is rejected. Remove only those blanks."""
     categories = worksheet.col_values(9)
     targets = []
     for index, txn in enumerate(id_column, start=1):
-        if not str(txn).strip().isdigit() or _row_is_held(index, withdraw_start, write_deposits, write_withdrawals):
+        if not str(txn).strip().isdigit() or _row_is_held(index, withdraw_start, write_deposits, write_withdrawals, deposit_end, withdraw_end):
             continue
         if index - 1 >= len(categories):
             break
@@ -1322,7 +1397,7 @@ def repair_written_columns() -> int:
                 row_number = positions.get(item.external_id)
                 if row_number is None:
                     continue
-                if _row_is_held(row_number, held_withdraw, row.deposits_enabled, row.withdrawals_enabled):
+                if _row_is_held(row_number, held_withdraw, row.deposits_enabled, row.withdrawals_enabled, row.deposit_end_row or 0, row.withdraw_end_row or 0):
                     continue
                 ranges.append(
                     {

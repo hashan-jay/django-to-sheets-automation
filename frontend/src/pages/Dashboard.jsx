@@ -67,7 +67,9 @@ function emptySheets() {
     blocked: false,
     auto_sync: true,
     deposit_start_row: "105",
+    deposit_end_row: "",
     withdraw_start_row: "1000",
+    withdraw_end_row: "",
     deposits_enabled: true,
     withdrawals_enabled: true,
   }));
@@ -85,7 +87,9 @@ function sheetsFromStatus(sheet) {
         blocked: Boolean(found.blocked),
         auto_sync: found.auto_sync !== false,
         deposit_start_row: String(found.deposit_start_row || 105),
+        deposit_end_row: found.deposit_end_row ? String(found.deposit_end_row) : "",
         withdraw_start_row: String(found.withdraw_start_row || 1000),
+        withdraw_end_row: found.withdraw_end_row ? String(found.withdraw_end_row) : "",
         deposits_enabled: found.deposits_enabled !== false,
         withdrawals_enabled: found.withdrawals_enabled !== false,
       };
@@ -98,7 +102,9 @@ function sheetsFromStatus(sheet) {
         blocked: Boolean(sheet?.blocked),
         auto_sync: sheet?.auto_sync !== false,
         deposit_start_row: String(sheet?.deposit_start_row || 105),
+        deposit_end_row: sheet?.deposit_end_row ? String(sheet.deposit_end_row) : "",
         withdraw_start_row: String(sheet?.withdraw_start_row || 1000),
+        withdraw_end_row: sheet?.withdraw_end_row ? String(sheet.withdraw_end_row) : "",
         deposits_enabled: sheet?.deposits_enabled !== false,
         withdrawals_enabled: sheet?.withdrawals_enabled !== false,
       };
@@ -176,12 +182,14 @@ export default function Dashboard() {
         body: {
           slot,
           deposit_start_row: String(current?.deposit_start_row || "105").trim(),
+          deposit_end_row: String(current?.deposit_end_row || "").trim(),
           withdraw_start_row: String(current?.withdraw_start_row || "1000").trim(),
+          withdraw_end_row: String(current?.withdraw_end_row || "").trim(),
         },
       });
       setSheets(sheetsFromStatus(saved));
       const savedSheet = (saved.sheets || []).find((item) => item.slot === slot) || saved;
-      setSheetNote(`Saved Google Sheet ${slot}. Deposits start at row ${savedSheet.deposit_start_row}. Withdrawals start at row ${savedSheet.withdraw_start_row}.`);
+      setSheetNote(`Saved Google Sheet ${slot}. Deposits use rows ${savedSheet.deposit_start_row}–${savedSheet.deposit_end_row || Number(savedSheet.withdraw_start_row) - 1}. Withdrawals start at row ${savedSheet.withdraw_start_row}.`);
       setSheetNoteOk(true);
     } catch (err) {
       setSheetNote(err.message);
@@ -427,11 +435,20 @@ export default function Dashboard() {
   function rowNumbersValid(sheet) {
     const depositNumber = Number(sheet.deposit_start_row);
     const withdrawNumber = Number(sheet.withdraw_start_row);
+    const depositEnd = String(sheet.deposit_end_row || "").trim();
+    const withdrawEnd = String(sheet.withdraw_end_row || "").trim();
+    const depositEndNumber = depositEnd ? Number(depositEnd) : withdrawNumber - 1;
+    const withdrawEndNumber = withdrawEnd ? Number(withdrawEnd) : withdrawNumber;
     return Number.isInteger(depositNumber)
       && Number.isInteger(withdrawNumber)
+      && Number.isInteger(depositEndNumber)
+      && Number.isInteger(withdrawEndNumber)
       && depositNumber >= 2
       && withdrawNumber <= 1000000
-      && depositNumber < withdrawNumber;
+      && depositNumber <= depositEndNumber
+      && depositEndNumber < withdrawNumber
+      && withdrawEndNumber >= withdrawNumber
+      && withdrawEndNumber <= 1000000;
   }
   const viewStatus = friendlyStatus(live, refreshing, data);
   const dayCount = Number(bucket(stats, "row_count").count) || 0;
@@ -565,6 +582,17 @@ export default function Dashboard() {
                     onChange={(event) => updateSheetRow(sheet.slot, "deposit_start_row", event.target.value)}
                   />
                 </label>
+                <label className={rowNumbersValid(sheet) ? "" : "is-invalid"}>
+                  Deposits to
+                  <input
+                    inputMode="numeric"
+                    aria-label={`Google Sheet ${sheet.slot} deposit end row`}
+                    value={sheet.deposit_end_row}
+                    placeholder={String(Number(sheet.withdraw_start_row || 1000) - 1)}
+                    disabled={sheet.blocked}
+                    onChange={(event) => updateSheetRow(sheet.slot, "deposit_end_row", event.target.value)}
+                  />
+                </label>
               </div>
               <div className="sheet-row-pair">
                 <button
@@ -586,13 +614,24 @@ export default function Dashboard() {
                     onChange={(event) => updateSheetRow(sheet.slot, "withdraw_start_row", event.target.value)}
                   />
                 </label>
+                <label className={rowNumbersValid(sheet) ? "" : "is-invalid"}>
+                  Withdrawals to
+                  <input
+                    inputMode="numeric"
+                    aria-label={`Google Sheet ${sheet.slot} withdraw end row`}
+                    value={sheet.withdraw_end_row}
+                    placeholder="Last row"
+                    disabled={sheet.blocked}
+                    onChange={(event) => updateSheetRow(sheet.slot, "withdraw_end_row", event.target.value)}
+                  />
+                </label>
               </div>
               <button type="button" onClick={(event) => saveStartRows(event, sheet.slot)} disabled={sheet.blocked || rowsBusy !== 0 || sheetSyncing !== 0 || tallying || !rowNumbersValid(sheet)}>
                 {rowsBusy === sheet.slot ? "Saving…" : "Save rows"}
               </button>
               <p className="sheet-start-hint">
                 {rowNumbersValid(sheet)
-                  ? `${sheet.deposits_enabled ? `Deposits use empty rows ${Number(sheet.deposit_start_row)}–${Number(sheet.withdraw_start_row) - 1}` : "Deposits are disabled"}. ${sheet.withdrawals_enabled ? `Withdrawals start at ${Number(sheet.withdraw_start_row)}` : "Withdrawals are disabled"}.`
+                  ? `${sheet.deposits_enabled ? `Deposits use empty rows ${Number(sheet.deposit_start_row)}–${Number(sheet.deposit_end_row || Number(sheet.withdraw_start_row) - 1)}` : "Deposits are disabled"}. ${sheet.withdrawals_enabled ? `Withdrawals use rows ${Number(sheet.withdraw_start_row)}${sheet.withdraw_end_row ? `–${Number(sheet.withdraw_end_row)}` : " downward"}` : "Withdrawals are disabled"}.`
                   : "Enter whole numbers from 2 to 1000000. Deposits must start above withdrawals."}
               </p>
             </div>
