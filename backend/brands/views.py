@@ -7,7 +7,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from brands import livecache
-from brands.models import SYDNEY, Brand, sydney_today
+from brands.models import SYDNEY, Brand, GoogleSheetSetting, Transaction, sydney_today
 from brands.poller import note_watch, start_poller
 from brands.customers import customer_board, start_customer_sync
 from brands.sheets import (
@@ -122,6 +122,93 @@ class GoogleSheetSyncView(APIView):
             message = str(exc).splitlines()[0][:500] or "The Google Sheet could not be updated."
             return Response({"detail": message}, status=502)
         return Response(result)
+
+
+class SheetAnalyticsView(APIView):
+    """Compare saved deposits and withdrawals with the rows this app has written.
+
+    Reads the database only. It does not open Google Sheets or change the writer.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        day = _parse_day(request.query_params.get("date"))
+        sheets = list(GoogleSheetSetting.objects.filter(slot__in=(1, 2, 3)).order_by("slot"))
+        saved = [row for row in sheets if (row.sheet_url or "").strip()]
+        transactions = (
+            Transaction.objects.filter(txn_date=day, type__in=["DEPOSIT", "WITHDRAW"], brand__is_active=True)
+            .select_related("brand")
+            .prefetch_related("sheet_exports")
+            .order_by("-created_at", "-id")
+        )
+        rows = []
+        counts = {
+            "all_deposit": 0,
+            "all_withdraw": 0,
+            "sent_deposit": 0,
+            "sent_withdraw": 0,
+            "missing_deposit": 0,
+            "missing_withdraw": 0,
+        }
+        for item in transactions:
+            exported = {mark.slot for mark in item.sheet_exports.all()}
+            sent = [row for row in saved if row.slot in exported]
+            missing = []
+            for row in saved:
+                if row.slot in exported:
+                    continue
+                missing.append({"slot": row.slot, "sheet": row.sheet_name or f"Google Sheet {row.slot}", "reason": _unsent_reason(item, row)})
+            if not saved and item.status == "COMPLETED":
+                missing.append({"slot": 0, "sheet": "Google Sheet", "reason": "No Google Sheet link is saved."})
+            kind = "deposit" if item.type == "DEPOSIT" else "withdraw"
+            counts[f"all_{kind}"] += 1
+            if sent:
+                counts[f"sent_{kind}"] += 1
+            if missing:
+                counts[f"missing_{kind}"] += 1
+            rows.append({
+                "id": item.external_id,
+                "brand": item.brand.name,
+                "type": item.type,
+                "status": item.status,
+                "amount": f"{item.amount:.2f}",
+                "username": item.username,
+                "name": item.player_name,
+                "time": item.created_at.astimezone(SYDNEY).strftime("%Y-%m-%d %H:%M") if item.created_at else "",
+                "sent_sheets": [row.sheet_name or f"Google Sheet {row.slot}" for row in sent],
+                "missing": missing,
+            })
+        return Response({
+            "date": day.isoformat(),
+            "sheets": [
+                {
+                    "slot": row.slot,
+                    "name": row.sheet_name or f"Google Sheet {row.slot}",
+                    "saved": bool((row.sheet_url or "").strip()),
+                }
+                for row in sheets
+            ],
+            "counts": counts,
+            "rows": rows,
+        })
+
+
+def _unsent_reason(item: Transaction, row: GoogleSheetSetting) -> str:
+    label = row.sheet_name or f"Google Sheet {row.slot}"
+    if item.status != "COMPLETED":
+        return f"Status is {item.status}. Only completed deposits and withdrawals are written."
+    if item.type == "DEPOSIT" and not row.deposits_enabled:
+        return f"Deposit writing is disabled on {label}."
+    if item.type == "WITHDRAW" and not row.withdrawals_enabled:
+        return f"Withdrawal writing is disabled on {label}."
+    if row.blocked:
+        return f"{label} is blocked, so live writing is paused."
+    if not row.auto_sync:
+        return f"Auto Sync is off on {label}. It is sent only by Sync with Google Sheet."
+    if (row.last_error or "").strip():
+        return f"{label} last reported: {row.last_error.strip()[:180]}"
+    return f"Completed and not on {label} yet. The writer sends it on the next pass, unless that day's tab is locked."
 
 
 class TallySystemBanksView(APIView):

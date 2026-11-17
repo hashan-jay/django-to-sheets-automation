@@ -1390,6 +1390,48 @@ td.bank-name, td.bank-account, td.payment-method { font-weight: 700; color: #0f2
 
 .empty { color: #5b6b7c; text-align: center; padding: 24px; }
 
+.analytics {
+  padding: 20px 24px 40px;
+}
+
+.analytics-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.analytics-head h2 {
+  margin: 0;
+}
+
+.analytics-head p,
+.analytics-wait,
+.analytics-card header p {
+  margin: 4px 0 0;
+  color: #5b6b7c;
+  font-weight: 600;
+}
+
+.analytics-card {
+  margin-top: 16px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 14px;
+}
+
+.analytics-card header h3 {
+  margin: 0;
+}
+
+.analytics-card .table-wrap {
+  max-height: 420px;
+  overflow: auto;
+  margin-top: 10px;
+}
+
 .stats {
   margin-top: 16px;
   background:
