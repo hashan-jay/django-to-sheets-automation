@@ -235,6 +235,7 @@ def _fill_missing_sheet_names() -> None:
 def public_status() -> dict:
     ensure_sheet_slots()
     GoogleSheetSetting.objects.filter(last_error__contains="Quota exceeded").update(last_error="")
+    GoogleSheetSetting.objects.filter(last_error__contains="[429]").update(last_error="")
     _fill_missing_sheet_names()
     row = sheet_setting(1)
     sheets = [_sheet_public(item) for item in GoogleSheetSetting.objects.filter(slot__in=SHEET_SLOTS).order_by("slot")]
@@ -279,7 +280,7 @@ def _sync_brands_for_day(day, slot: int) -> dict:
     )
     spreadsheet = _open_spreadsheet(sheet_id)
     title = str(day.day)
-    worksheet = next((item for item in spreadsheet.worksheets() if str(item.title).strip() == title), None)
+    worksheet = next((item for item in _worksheets(spreadsheet) if str(item.title).strip() == title), None)
     removed = (
         _remove_uncompleted(
             worksheet,
@@ -304,7 +305,7 @@ def _sync_brands_for_day(day, slot: int) -> dict:
         write_withdrawals=row.withdrawals_enabled,
     )
     if worksheet is not None:
-        worksheet = next((item for item in spreadsheet.worksheets() if str(item.title).strip() == title), None)
+        worksheet = next((item for item in _worksheets(spreadsheet) if str(item.title).strip() == title), None)
     present = _cashbook_ids(worksheet) if worksheet is not None else set()
     wanted = {item.external_id for item in pending}
     database_count = len(wanted)
@@ -364,7 +365,7 @@ def start_writer() -> None:
 
 def _writer_loop() -> None:
     while True:
-        _wake.wait(timeout=1)
+        _wake.wait(timeout=8)
         _wake.clear()
         try:
             close_old_connections()
@@ -375,7 +376,7 @@ def _writer_loop() -> None:
                     continue
                 if count == 0:
                     break
-                time.sleep(3)
+                time.sleep(8)
             if _gateway_patch.is_set():
                 _gateway_patch.clear()
                 patch_gateway_banks()
@@ -502,7 +503,7 @@ def _quota_paused() -> bool:
 
 def _pause_for_quota() -> None:
     global _quota_pause_until
-    _quota_pause_until = time.monotonic() + 70
+    _quota_pause_until = time.monotonic() + 90
 
 
 def _sheet_error(exc: object) -> str:
@@ -512,6 +513,17 @@ def _sheet_error(exc: object) -> str:
         _pause_for_quota()
         return ""
     return message
+
+
+def _worksheets(spreadsheet):
+    """Reuse the tab list for half a minute so a write does not re-read it every pass."""
+    now = time.monotonic()
+    cached = getattr(spreadsheet, "_kaboom_tabs", None)
+    if isinstance(cached, tuple) and now - cached[1] < 30:
+        return cached[0]
+    tabs = spreadsheet.worksheets()
+    spreadsheet._kaboom_tabs = (tabs, now)
+    return tabs
 
 
 def _open_spreadsheet(sheet_id: str):
@@ -550,7 +562,7 @@ def _write_cashbook(
     deposit_start = int(deposit_start)
     withdraw_start = int(withdraw_start)
     deposit_end = withdraw_start - 1
-    tabs = {str(worksheet.title).strip(): worksheet for worksheet in spreadsheet.worksheets()}
+    tabs = {str(worksheet.title).strip(): worksheet for worksheet in _worksheets(spreadsheet)}
     grouped: dict[str, list[Transaction]] = {}
     for item in pending:
         grouped.setdefault(_tab_name(item), []).append(item)
@@ -679,7 +691,7 @@ def _write_payment_methods(spreadsheet, day, types: list[str] | None = None, wit
     if not items:
         return 0
     title = str(day.day)
-    worksheet = next((item for item in spreadsheet.worksheets() if str(item.title).strip() == title), None)
+    worksheet = next((item for item in _worksheets(spreadsheet) if str(item.title).strip() == title), None)
     if worksheet is None or _sheet_is_locked(worksheet):
         return 0
     positions: dict[str, int] = {}
@@ -856,7 +868,7 @@ def patch_gateway_banks() -> int:
         updated = 0
         for row in sheets:
             spreadsheet = _open_spreadsheet(normalize_google_sheet_id(row.sheet_url))
-            tabs = {str(worksheet.title).strip(): worksheet for worksheet in spreadsheet.worksheets()}
+            tabs = {str(worksheet.title).strip(): worksheet for worksheet in _worksheets(spreadsheet)}
             grouped: dict[str, list[Transaction]] = {}
             for item in items:
                 grouped.setdefault(_tab_name(item), []).append(item)
@@ -1290,7 +1302,7 @@ def repair_written_columns() -> int:
         if not exported:
             continue
         spreadsheet = _open_spreadsheet(normalize_google_sheet_id(row.sheet_url))
-        tabs = {str(worksheet.title).strip(): worksheet for worksheet in spreadsheet.worksheets()}
+        tabs = {str(worksheet.title).strip(): worksheet for worksheet in _worksheets(spreadsheet)}
         grouped: dict[str, list[Transaction]] = {}
         for mark in exported:
             grouped.setdefault(_tab_name(mark.transaction), []).append(mark.transaction)
