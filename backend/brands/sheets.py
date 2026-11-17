@@ -139,6 +139,19 @@ def set_sheet_blocked(slot_raw, blocked_raw) -> GoogleSheetSetting:
     return row
 
 
+def clear_blocked_sheet(slot_raw) -> GoogleSheetSetting:
+    """Remove the saved link only while that sheet is blocked. Other slots stay as they are."""
+    slot = _slot_number(slot_raw)
+    row = sheet_setting(slot)
+    if not row.blocked:
+        raise ValueError(f"Block {sheet_label(slot)} before clearing its link.")
+    row.sheet_url = ""
+    row.sheet_name = ""
+    row.last_error = ""
+    row.save(update_fields=["sheet_url", "sheet_name", "last_error", "updated_at"])
+    return row
+
+
 def set_sheet_auto_sync(slot_raw, enabled_raw) -> GoogleSheetSetting:
     slot = _slot_number(slot_raw)
     enabled = enabled_raw is True or str(enabled_raw).strip().lower() in {"1", "true", "yes", "on"}

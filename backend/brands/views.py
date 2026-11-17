@@ -13,6 +13,7 @@ from brands.customers import customer_board, start_customer_sync
 from brands.sheets import (
     export_pending,
     public_status,
+    clear_blocked_sheet,
     save_sheet_url,
     save_start_rows,
     set_sheet_auto_sync,
@@ -80,6 +81,17 @@ class GoogleSheetBlockView(APIView):
     def post(self, request):
         try:
             set_sheet_blocked(request.data.get("slot") or 1, request.data.get("blocked"))
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=400)
+        return Response(public_status())
+
+
+class GoogleSheetClearView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        try:
+            clear_blocked_sheet(request.data.get("slot") or 1)
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=400)
         return Response(public_status())

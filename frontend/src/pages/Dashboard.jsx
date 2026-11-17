@@ -132,6 +132,7 @@ export default function Dashboard() {
   const [sheetBusy, setSheetBusy] = useState(0);
   const [sheetSyncing, setSheetSyncing] = useState(0);
   const [sheetBlocking, setSheetBlocking] = useState(0);
+  const [sheetClearing, setSheetClearing] = useState(0);
   const [sheetAuto, setSheetAuto] = useState(0);
   const [sheetWrites, setSheetWrites] = useState("");
   const [tallying, setTallying] = useState(false);
@@ -271,6 +272,23 @@ export default function Dashboard() {
       setSheetNoteOk(false);
     } finally {
       setSheetBlocking(0);
+    }
+  }
+
+  async function clearSheet(slot) {
+    setSheetClearing(slot);
+    setSheetNote("");
+    setSheetNoteOk(false);
+    try {
+      const saved = await api("/api/google-sheet/clear/", { method: "POST", body: { slot } });
+      setSheets(sheetsFromStatus(saved));
+      setSheetNote(`Google Sheet ${slot} link was cleared. The sheet stays blocked.`);
+      setSheetNoteOk(true);
+    } catch (err) {
+      setSheetNote(err.message);
+      setSheetNoteOk(false);
+    } finally {
+      setSheetClearing(0);
     }
   }
 
@@ -560,6 +578,16 @@ export default function Dashboard() {
               >
                 {sheetBlocking === sheet.slot ? "Saving…" : sheet.blocked ? "Unblock Sheet" : "Block Sheet"}
               </button>
+              {sheet.blocked && (
+                <button
+                  type="button"
+                  className="sheet-clear"
+                  onClick={() => clearSheet(sheet.slot)}
+                  disabled={busyHere || sheetClearing !== 0 || !link}
+                >
+                  {sheetClearing === sheet.slot ? "Clearing…" : "Clear Sheet"}
+                </button>
+              )}
             </div>
             <div className="sheet-starts">
               <div className="sheet-row-pair">

@@ -236,6 +236,12 @@ button {
   background: #115e59;
 }
 
+.sheet-url-row button.sheet-clear {
+  background: #fff;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+
 .sheet-url-row button.sheet-block {
   background: #92400e;
 }
