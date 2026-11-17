@@ -1414,6 +1414,38 @@ td.bank-name, td.bank-account, td.payment-method { font-weight: 700; color: #0f2
   font-weight: 600;
 }
 
+.analytics-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.analytics-filters label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.analytics-filters select {
+  height: 40px;
+  min-width: 180px;
+  border: 1px solid #d5dee8;
+  border-radius: 12px;
+  background: #fff;
+  color: #0a1628;
+  padding: 0 10px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
 .analytics-card {
   margin-top: 16px;
   background: #fff;
