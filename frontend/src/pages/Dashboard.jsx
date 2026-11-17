@@ -133,6 +133,7 @@ export default function Dashboard() {
   const [sheetSyncing, setSheetSyncing] = useState(0);
   const [sheetBlocking, setSheetBlocking] = useState(0);
   const [sheetClearing, setSheetClearing] = useState(0);
+  const [confirmClear, setConfirmClear] = useState(0);
   const [sheetAuto, setSheetAuto] = useState(0);
   const [sheetWrites, setSheetWrites] = useState("");
   const [tallying, setTallying] = useState(false);
@@ -284,6 +285,7 @@ export default function Dashboard() {
       setSheets(sheetsFromStatus(saved));
       setSheetNote(`Google Sheet ${slot} link was cleared. The sheet stays blocked.`);
       setSheetNoteOk(true);
+      setConfirmClear(0);
     } catch (err) {
       setSheetNote(err.message);
       setSheetNoteOk(false);
@@ -582,7 +584,7 @@ export default function Dashboard() {
                 <button
                   type="button"
                   className="sheet-clear"
-                  onClick={() => clearSheet(sheet.slot)}
+                  onClick={() => setConfirmClear(sheet.slot)}
                   disabled={busyHere || sheetClearing !== 0 || !link}
                 >
                   {sheetClearing === sheet.slot ? "Clearing…" : "Clear Sheet"}
@@ -670,6 +672,15 @@ export default function Dashboard() {
         <p className={sheetNoteOk ? "sheet-url-note is-ok" : "sheet-url-note is-error"} role="status">
           {sheetNote}
         </p>
+      )}
+      {confirmClear !== 0 && (
+        <ClearSheetConfirm
+          busy={sheetClearing === confirmClear}
+          onYes={() => clearSheet(confirmClear)}
+          onNo={() => {
+            if (sheetClearing === 0) setConfirmClear(0);
+          }}
+        />
       )}
       {tallying && (
         <div className="tally-overlay" role="status" aria-live="polite">
@@ -1040,6 +1051,35 @@ function popupCanScroll(event) {
     node = node.parentElement;
   }
   return false;
+}
+
+function ClearSheetConfirm({ busy, onYes, onNo }) {
+  useEffect(() => lockPageScroll(), []);
+
+  useEffect(() => {
+    function onKey(event) {
+      if (event.key === "Escape" && !busy) onNo();
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [busy, onNo]);
+
+  return (
+    <div
+      className="modal-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !busy) onNo();
+      }}
+    >
+      <div className="modal logout-dialog" role="dialog" aria-modal="true" aria-labelledby="clear-sheet-title">
+        <h2 id="clear-sheet-title">Are you sure to Clear this Google Sheet from the system. Clearing the Link will disconnect the access with the Google Sheet writing!</h2>
+        <div className="logout-actions">
+          <button type="button" className="modal-close" onClick={onNo} disabled={busy}>No</button>
+          <button type="button" className="logout-yes" onClick={onYes} disabled={busy}>{busy ? "Clearing…" : "Yes"}</button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export function lockPageScroll() {
