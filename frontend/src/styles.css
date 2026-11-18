@@ -1471,27 +1471,33 @@ td.bank-name, td.bank-account, td.payment-method { font-weight: 700; color: #0f2
 }
 
 .stats {
-  margin-top: 16px;
-  background:
-    radial-gradient(1200px 180px at 100% 0%, rgba(15, 118, 110, 0.08), transparent 50%),
-    #f8fafc;
-  border: 1px solid var(--line);
-  border-radius: 20px;
-  padding: 16px;
-  box-shadow: 0 10px 30px rgba(15, 39, 68, 0.04);
+  margin-top: 18px;
+  background: #fff;
+  border: 1px solid #e6edf5;
+  border-radius: 22px;
+  padding: 18px;
+  box-shadow: 0 16px 40px rgba(15, 39, 68, 0.05);
 }
 
 .stats-head {
   display: flex;
   justify-content: space-between;
-  align-items: flex-end;
+  align-items: center;
   gap: 16px;
-  margin-bottom: 12px;
+  margin-bottom: 14px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #eef2f6;
+}
+
+.stats h3 {
+  margin: 0;
+  font-size: 18px;
+  letter-spacing: -0.03em;
 }
 
 .stats-head-side {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   justify-content: flex-end;
   gap: 12px;
   margin-left: auto;
@@ -1501,30 +1507,24 @@ td.bank-name, td.bank-account, td.payment-method { font-weight: 700; color: #0f2
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 44px;
+  height: auto;
   margin: 0;
-  padding: 0 6px 0 14px;
-  border: 1px solid #d5dee8;
-  border-radius: 999px;
-  background: #fff;
+  padding: 0 8px 0 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  background: #f8fafc;
   color: #64748b;
   font-size: 11px;
   font-weight: 750;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  box-shadow: 0 1px 2px rgba(10, 22, 40, 0.04);
-  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
 }
 
-.stats-brand:hover {
-  border-color: #99f6e4;
-  box-shadow: 0 8px 20px rgba(15, 118, 110, 0.12);
-  transform: translateY(-1px);
-}
-
+.stats-brand:hover,
 .stats-brand:focus-within {
   border-color: #0f766e;
-  box-shadow: 0 0 0 4px rgba(15, 118, 110, 0.16);
+  box-shadow: 0 0 0 4px rgba(15, 118, 110, 0.12);
 }
 
 .stats-brand.is-filtered {
@@ -1534,10 +1534,10 @@ td.bank-name, td.bank-account, td.payment-method { font-weight: 700; color: #0f2
 }
 
 .stats-brand select {
-  height: 32px;
-  min-width: 168px;
+  height: 40px;
+  min-width: 150px;
   border: 0;
-  border-radius: 999px;
+  border-radius: 12px;
   background: transparent;
   color: #0a1628;
   padding: 0 8px;
@@ -1559,24 +1559,27 @@ td.bank-name, td.bank-account, td.payment-method { font-weight: 700; color: #0f2
   font-weight: 600;
 }
 
-.stats-net { text-align: right; }
+.stats-net { text-align: right; min-width: 230px; }
 button.stats-net {
-  border: 1px solid transparent;
-  border-radius: 12px;
-  background: transparent;
-  padding: 8px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #fff, #f8fafc);
+  padding: 10px 14px;
   color: inherit;
-  transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+  box-shadow: 0 8px 18px rgba(15, 39, 68, 0.05);
+  transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
 }
 button.stats-net:hover,
 button.stats-net.is-hot,
 button.stats-net.selected {
+  transform: translateY(-2px);
   background: #fff;
-  border-color: #e2e8f0;
+  border-color: #bbf7d0;
+  box-shadow: 0 14px 28px rgba(21, 128, 61, 0.12);
 }
 button.stats-net.selected {
   border-color: #15803d;
-  box-shadow: 0 0 0 3px rgba(21, 128, 61, 0.16);
+  box-shadow: 0 0 0 3px rgba(21, 128, 61, 0.14), 0 14px 28px rgba(21, 128, 61, 0.12);
 }
 button.stats-net.is-live strong {
   animation: amount-pop 500ms ease;
@@ -1634,7 +1637,7 @@ button.stats-net.is-live strong {
 .widgets {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
+  gap: 12px;
 }
 
 .widget {
@@ -1643,11 +1646,11 @@ button.stats-net.is-live strong {
   width: 100%;
   text-align: left;
   color: inherit;
-  background: linear-gradient(180deg, #fff 0%, #fbfcfe 100%);
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  padding: 14px 14px 14px 18px;
-  box-shadow: 0 1px 2px rgba(15, 39, 68, 0.04);
+  background: #fff;
+  border: 1px solid #e6edf5;
+  border-radius: 18px;
+  padding: 16px 16px 14px 18px;
+  box-shadow: 0 8px 20px rgba(15, 39, 68, 0.04);
   transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease, opacity 180ms ease;
 }
 
