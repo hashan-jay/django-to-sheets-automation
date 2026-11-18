@@ -1504,52 +1504,93 @@ td.bank-name, td.bank-account, td.payment-method { font-weight: 700; color: #0f2
 }
 
 .stats-brand {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: auto;
+  position: relative;
   margin: 0;
-  padding: 0 8px 0 14px;
+}
+
+.stats-brand-button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  min-width: 180px;
+  height: 64px;
+  margin: 0;
+  padding: 8px 36px 8px 14px;
   border: 1px solid #e2e8f0;
   border-radius: 16px;
-  background: #f8fafc;
+  background: #f8fafc url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%230a1628' d='M1 1.5 6 6.5 11 1.5'/%3E%3C/svg%3E") no-repeat right 14px center;
   color: #64748b;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
+}
+
+.stats-brand-button span {
   font-size: 11px;
   font-weight: 750;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  transition: border-color 160ms ease, box-shadow 160ms ease;
 }
 
-.stats-brand:hover,
-.stats-brand:focus-within {
+.stats-brand-button strong {
+  color: #0a1628;
+  font-size: 15px;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+}
+
+.stats-brand.is-open .stats-brand-button,
+.stats-brand-button:hover,
+.stats-brand-button:focus-visible {
   border-color: #0f766e;
+  background-color: #fff;
   box-shadow: 0 0 0 4px rgba(15, 118, 110, 0.12);
+  outline: none;
 }
 
-.stats-brand.is-filtered {
+.stats-brand.is-filtered .stats-brand-button {
   border-color: #0f766e;
-  background: #f0fdfa;
+  background-color: #f0fdfa;
+}
+
+.stats-brand.is-filtered .stats-brand-button span {
   color: #0f766e;
 }
 
-.stats-brand select {
-  height: 40px;
-  min-width: 150px;
+.stats-brand-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 100%;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 16px 40px rgba(15, 39, 68, 0.14);
+}
+
+.stats-brand-menu button {
+  width: 100%;
+  height: 38px;
   border: 0;
-  border-radius: 12px;
+  border-radius: 10px;
   background: transparent;
   color: #0a1628;
-  padding: 0 8px;
-  font-size: 13px;
-  font-weight: 750;
-  letter-spacing: 0;
-  text-transform: none;
+  padding: 0 10px;
+  font-weight: 700;
+  text-align: left;
   cursor: pointer;
 }
 
-.stats-brand select:focus {
-  outline: none;
+.stats-brand-menu button:hover,
+.stats-brand-menu button.is-selected {
+  background: #f0fdfa;
+  color: #0f766e;
 }
 
 .stats-head p, .stats-net span {

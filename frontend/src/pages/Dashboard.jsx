@@ -122,6 +122,64 @@ export function today() {
   }).format(new Date());
 }
 
+function BrandMenu({ value, brands, onChange }) {
+  const [open, setOpen] = useState(false);
+  const root = useRef(null);
+  const choices = [{ id: "all", name: "All", label: "All brands" }, ...brands.map((item) => ({ id: item.id, name: item.name, label: item.name }))];
+  const current = choices.find((item) => item.name === value) || choices[0];
+
+  useEffect(() => {
+    if (!open) return undefined;
+    function onPointer(event) {
+      if (root.current && !root.current.contains(event.target)) setOpen(false);
+    }
+    function onKey(event) {
+      if (event.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", onPointer);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onPointer);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return (
+    <div className={`stats-brand${value !== "All" ? " is-filtered" : ""}${open ? " is-open" : ""}`} ref={root}>
+      <button
+        type="button"
+        className="stats-brand-button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((shown) => !shown)}
+      >
+        <span>Brand</span>
+        <strong>{current.label}</strong>
+      </button>
+      {open && (
+        <ul className="stats-brand-menu" role="listbox" aria-label="Statistics brand">
+          {choices.map((item) => (
+            <li key={item.id}>
+              <button
+                type="button"
+                role="option"
+                aria-selected={item.name === value}
+                className={item.name === value ? "is-selected" : ""}
+                onClick={() => {
+                  onChange(item.name);
+                  setOpen(false);
+                }}
+              >
+                {item.label}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const [brands, setBrands] = useState([]);
   const [group] = useState("All");
@@ -790,19 +848,11 @@ export default function Dashboard() {
               </p>
             </div>
             <div className="stats-head-side">
-              <label className={`stats-brand${statsBrand !== "All" ? " is-filtered" : ""}`}>
-                Brand
-                <select
-                  aria-label="Statistics brand"
-                  value={statsBrand}
-                  onChange={(event) => setStatsBrand(event.target.value)}
-                >
-                  <option value="All">All brands</option>
-                  {visibleBrands.map((item) => (
-                    <option key={item.id} value={item.name}>{item.name}</option>
-                  ))}
-                </select>
-              </label>
+              <BrandMenu
+                value={statsBrand}
+                brands={visibleBrands}
+                onChange={setStatsBrand}
+              />
             <button
               type="button"
               className={`stats-net${focus === "net_completed" ? " selected" : ""}${pulse.net_completed ? " is-live" : ""}`}
