@@ -140,15 +140,16 @@ def set_sheet_blocked(slot_raw, blocked_raw) -> GoogleSheetSetting:
 
 
 def clear_blocked_sheet(slot_raw) -> GoogleSheetSetting:
-    """Remove the saved link only while that sheet is blocked. Other slots stay as they are."""
+    """Remove the saved link and return that card to an open sheet with no link."""
     slot = _slot_number(slot_raw)
     row = sheet_setting(slot)
     if not row.blocked:
         raise ValueError(f"Block {sheet_label(slot)} before clearing its link.")
     row.sheet_url = ""
     row.sheet_name = ""
+    row.blocked = False
     row.last_error = ""
-    row.save(update_fields=["sheet_url", "sheet_name", "last_error", "updated_at"])
+    row.save(update_fields=["sheet_url", "sheet_name", "blocked", "last_error", "updated_at"])
     return row
 
 

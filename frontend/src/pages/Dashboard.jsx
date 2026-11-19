@@ -341,7 +341,7 @@ export default function Dashboard() {
     try {
       const saved = await api("/api/google-sheet/clear/", { method: "POST", body: { slot } });
       setSheets(sheetsFromStatus(saved));
-      setSheetNote(`Google Sheet ${slot} link was cleared. The sheet stays blocked.`);
+      setSheetNote(`Google Sheet ${slot} link was cleared. Paste a new link and save it.`);
       setSheetNoteOk(true);
       setConfirmClear(0);
     } catch (err) {
@@ -638,7 +638,7 @@ export default function Dashboard() {
               >
                 {sheetBlocking === sheet.slot ? "Saving…" : sheet.blocked ? "Unblock Sheet" : "Block Sheet"}
               </button>
-              {sheet.blocked && (
+              {sheet.blocked && link && (
                 <button
                   type="button"
                   className="sheet-clear"
