@@ -50,8 +50,8 @@ export default function App() {
       <header className="topbar">
         <div className="brand-lockup">
           <button type="button" className="brand-home" onClick={() => setPage("dashboard")}>
-            <h1>Group AH</h1>
-            <p>Live deposits and withdrawals for KABOOM77 and WOOSPIN.</p>
+            <h1>KABOOM77</h1>
+            <p>Live deposits and withdrawals for KABOOM77.</p>
           </button>
         </div>
         <div className="top-actions">

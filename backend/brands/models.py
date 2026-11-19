@@ -12,13 +12,13 @@ class Brand(models.Model):
     GROUP_AK = "GROUP AK"
     GROUP_U = "GROUP U"
     GROUP_Y = "GROUP Y"
-    GROUP_AH = "GROUP AH"
+    GROUP_KABOOM77 = "KABOOM77"
     GROUPS = (
         (GROUP_SOLO, GROUP_SOLO),
         (GROUP_AK, GROUP_AK),
         (GROUP_U, GROUP_U),
         (GROUP_Y, GROUP_Y),
-        (GROUP_AH, GROUP_AH),
+        (GROUP_KABOOM77, GROUP_KABOOM77),
     )
 
     name = models.CharField(max_length=64, unique=True)
