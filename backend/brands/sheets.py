@@ -1127,6 +1127,9 @@ def _token_gap(left: str, right: str) -> int | None:
     """0 when the words are the same. A small gap for a country code, as in ING and INGAU, or one different letter."""
     if left == right:
         return 0
+    pair = {left, right}
+    if pair == {"ubau", "ubank"}:
+        return 1
     longer, shorter = (left, right) if len(left) >= len(right) else (right, left)
     if len(shorter) >= 2 and longer.startswith(shorter):
         extra = longer[len(shorter) :]
@@ -1138,11 +1141,16 @@ def _token_gap(left: str, right: str) -> int | None:
 
 
 def _dropdown_score(label: str, choice: str) -> int | None:
+    """Lower is a closer dropdown entry. Every transaction word must be present.
+
+    The dropdown may contain extra words, as in ANZ BAILEY JAMES BROWN matching
+    ANZ ABN BAILEY JAMES BROWN. A single shared word such as ANZ is not enough.
+    """
     label_tokens = _bank_tokens(label)
     choice_tokens = list(_bank_tokens(choice))
-    if not label_tokens or len(label_tokens) != len(choice_tokens):
+    if len(label_tokens) < 2 or not choice_tokens:
         return None
-    score = 0
+    fuzzy = 0
     for token in label_tokens:
         found = None
         best = 99
@@ -1154,11 +1162,12 @@ def _dropdown_score(label: str, choice: str) -> int | None:
             found = index
         if found is None:
             return None
-        score += best
+        fuzzy += best
         choice_tokens.pop(found)
-    if score > 2:
+    extra = len(choice_tokens)
+    if fuzzy > 2 or extra > 4:
         return None
-    return score
+    return fuzzy + extra
 
 
 def _gateway_dropdown(label: str, choices: list[str]) -> str:
@@ -1180,6 +1189,8 @@ def _match_bank(label: str, choices: list[str]) -> str:
     """Return the dropdown entry for this bank. The cell is then that list value, not a free-typed name.
 
     ANZ JOSEPH PERERA matches Joseph Perera anz. INGAU SZE LIN LAU matches ING SZE LIN LAU.
+    ANZ BAILEY JAMES BROWN matches ANZ ABN BAILEY JAMES BROWN.
+    UBAU PHUONG LINH BUI matches UBANK PHUONG LINH BUI.
     """
     text = str(label or "").strip()
     if not text or not choices:
