@@ -291,11 +291,59 @@ button {
   color: #b45309;
 }
 
+.sheet-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sheet-actions button {
+  height: 40px;
+  border: 0;
+  border-radius: 12px;
+  padding: 0 14px;
+  background: #0f766e;
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 140ms ease, filter 140ms ease, box-shadow 140ms ease;
+}
+
+.sheet-actions button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: brightness(1.05);
+  box-shadow: 0 8px 16px rgba(15, 39, 68, 0.12);
+}
+
+.sheet-actions button.sheet-sync { background: #115e59; }
+.sheet-actions button.sheet-block { background: #92400e; }
+.sheet-actions button.sheet-unblock { background: #1d4ed8; }
+.sheet-actions button.sheet-auto.on { background: #0f766e; }
+.sheet-actions button.sheet-auto.off { background: #b91c1c; }
+.sheet-actions button.sheet-clear {
+  background: #fff;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+.sheet-actions button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
 .sheet-row-pair {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
+  padding: 10px;
+  border: 1px solid #e6edf5;
+  border-radius: 16px;
+  background: #fff;
 }
+
+.sheet-row-pair.is-deposit { border-color: #bbf7d0; background: #f7fef9; }
+.sheet-row-pair.is-withdraw { border-color: #fecaca; background: #fff8f8; }
 
 .sheet-starts button.row-write {
   background: #fff;
@@ -311,18 +359,25 @@ button {
 }
 
 .sheet-starts {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
   margin: 0;
-  padding-top: 0;
-  border-top: 0;
 }
 
+@media (max-width: 980px) {
+  .sheet-starts { grid-template-columns: 1fr; }
+}
+
+.sheet-starts button.sheet-save-rows,
 .sheet-start-hint {
-  flex: 1 1 220px;
-  margin: 0 0 8px;
+  grid-column: 1 / -1;
+}
+
+.sheet-starts button.sheet-save-rows {
+  justify-self: start;
+}
+  margin: 0;
   color: var(--muted);
   font-size: 12px;
   font-weight: 600;

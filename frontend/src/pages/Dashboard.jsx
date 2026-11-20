@@ -611,6 +611,8 @@ export default function Dashboard() {
               {link && (
                 <a className="sheet-open" href={link} target="_blank" rel="noreferrer">Open</a>
               )}
+            </div>
+            <div className="sheet-actions">
               <button type="submit" disabled={sheet.blocked || busyHere || !link}>{sheetBusy === sheet.slot ? "Saving…" : "Save"}</button>
               <button
                 type="button"
@@ -650,7 +652,7 @@ export default function Dashboard() {
               )}
             </div>
             <div className="sheet-starts">
-              <div className="sheet-row-pair">
+              <div className="sheet-row-pair is-deposit">
                 <button
                   type="button"
                   className={sheet.deposits_enabled ? "row-write" : "row-write is-stopped"}
@@ -682,10 +684,7 @@ export default function Dashboard() {
                   />
                 </label>
               </div>
-              <div className="sheet-row-pair">
-                <button
-                  type="button"
-                  className={sheet.withdrawals_enabled ? "row-write" : "row-write is-stopped"}
+              <div className="sheet-row-pair is-withdraw">
                   onClick={() => setRowWriting(sheet.slot, "withdrawals", !sheet.withdrawals_enabled)}
                   disabled={sheetWrites !== "" || !link}
                   aria-pressed={!sheet.withdrawals_enabled}
@@ -714,7 +713,7 @@ export default function Dashboard() {
                   />
                 </label>
               </div>
-              <button type="button" onClick={(event) => saveStartRows(event, sheet.slot)} disabled={sheet.blocked || rowsBusy !== 0 || sheetSyncing !== 0 || tallying || !rowNumbersValid(sheet)}>
+              <button type="button" className="sheet-save-rows" onClick={(event) => saveStartRows(event, sheet.slot)} disabled={sheet.blocked || rowsBusy !== 0 || sheetSyncing !== 0 || tallying || !rowNumbersValid(sheet)}>
                 {rowsBusy === sheet.slot ? "Saving…" : "Save rows"}
               </button>
               <p className="sheet-start-hint">
