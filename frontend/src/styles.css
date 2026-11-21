@@ -2371,15 +2371,40 @@ body.modal-open {
 
 .pipeline-card {
   min-width: 0;
-  padding: 10px 12px;
+  padding: 12px;
   border: 1px solid #d7e7da;
-  border-radius: 14px;
-  background: linear-gradient(180deg, #f7fbf7, #fff 42px);
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 8px 20px rgba(15, 39, 68, 0.04);
+  transition: transform 160ms ease, box-shadow 160ms ease;
+}
+
+.pipeline-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 28px rgba(15, 39, 68, 0.08);
+}
+
+.pipeline-card header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
 }
 
 .pipeline-card h3 {
   margin: 0;
   font-size: 14px;
+}
+
+.pipeline-card header strong {
+  font-size: 20px;
+  letter-spacing: -0.03em;
+}
+
+.pipeline-card header strong span {
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .pipeline-card p,
@@ -2391,6 +2416,28 @@ body.modal-open {
   font-weight: 700;
 }
 
+.pipeline-meter {
+  display: block;
+  height: 6px;
+  margin-top: 8px;
+  border-radius: 999px;
+  background: #e8f5ec;
+  overflow: hidden;
+}
+
+.pipeline-meter > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #3f6212;
+  transition: width 400ms ease;
+}
+
+.pipeline-card.is-pending .pipeline-meter > span { background: #b45309; }
+.pipeline-card.is-pending p { color: #b45309; }
+.pipeline-card.is-written .pipeline-meter > span { background: #0f766e; }
+.pipeline-card.is-written p { color: #0f766e; }
+
 .pipeline-note,
 .pipeline-empty { color: #64748b; font-weight: 600; }
 
@@ -2398,18 +2445,33 @@ body.modal-open {
   margin: 8px 0 0;
   padding: 0;
   list-style: none;
-  max-height: 160px;
+  max-height: 180px;
   overflow: auto;
 }
 
 .pipeline-card li {
   display: grid;
-  grid-template-columns: 46px 1.1fr 1.2fr auto auto;
+  grid-template-columns: 46px minmax(0, 1.1fr) minmax(0, 1.2fr) auto auto;
   gap: 6px;
-  padding: 4px 0;
-  border-top: 1px solid #eef2f6;
+  align-items: center;
+  margin-top: 4px;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 10px;
   font-size: 12px;
   font-weight: 650;
+  transition: background 140ms ease, border-color 140ms ease;
+}
+
+.pipeline-card li:hover {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+}
+
+.pipeline-card li em {
+  font-style: normal;
+  color: #0f766e;
+  font-weight: 800;
 }
 
 @media (max-width: 980px) {

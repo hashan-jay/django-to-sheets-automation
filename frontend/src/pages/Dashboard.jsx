@@ -1335,21 +1335,30 @@ function SheetPipeline({ date, live, revision }) {
   return (
     <section className="pipeline" aria-label="Sheet writing progress">
       <PipelineColumn
+        tone="received"
         title="Received from the API"
-        stat={`${received.got.toLocaleString()} out of ${received.total.toLocaleString()} transactions received by the API`}
+        got={received.got}
+        total={received.total}
+        detail="received by the API"
         rows={received.rows}
         empty="No transactions received for this date."
       />
       <PipelineColumn
+        tone="pending"
         title="Processing to the sheet"
-        stat={`${pending.got.toLocaleString()} out of ${pending.total.toLocaleString()} transactions are processing to write`}
+        got={pending.got}
+        total={pending.total}
+        detail="are processing to write"
         note={sheetLine}
         rows={pending.rows}
         empty="No transactions are waiting to be written."
       />
       <PipelineColumn
+        tone="written"
         title="Written on the sheet"
-        stat={`${written.got.toLocaleString()} out of ${written.total.toLocaleString()} transactions are written`}
+        got={written.got}
+        total={written.total}
+        detail="are written"
         note={sheetLine}
         rows={written.rows}
         empty="No transactions have been written for this date."
@@ -1358,11 +1367,16 @@ function SheetPipeline({ date, live, revision }) {
   );
 }
 
-function PipelineColumn({ title, stat, note, rows, empty }) {
+function PipelineColumn({ tone, title, got, total, detail, note, rows, empty }) {
+  const share = total > 0 ? Math.min(100, Math.round((got / total) * 100)) : 0;
   return (
-    <article className="pipeline-card">
-      <h3>{title}</h3>
-      <p>{stat}</p>
+    <article className={`pipeline-card is-${tone}`}>
+      <header>
+        <h3>{title}</h3>
+        <strong>{got.toLocaleString()}<span> / {total.toLocaleString()}</span></strong>
+      </header>
+      <p>{got.toLocaleString()} out of {total.toLocaleString()} transactions {detail}</p>
+      <span className="pipeline-meter" aria-hidden="true"><span style={{ width: `${share}%` }} /></span>
       {note && <p className="pipeline-note">{note}</p>}
       {rows.length === 0 ? <p className="pipeline-empty">{empty}</p> : (
         <ul>
@@ -1371,8 +1385,8 @@ function PipelineColumn({ title, stat, note, rows, empty }) {
               <span>{row.time}</span>
               <span>{row.id}</span>
               <span>{row.name}</span>
-              <span>{row.amount}</span>
-              <span>{row.type}</span>
+              <strong>{row.amount}</strong>
+              <em>{row.type}</em>
             </li>
           ))}
         </ul>
