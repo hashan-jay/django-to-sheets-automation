@@ -1320,7 +1320,7 @@ function SheetPipeline({ date, live, revision }) {
     }
     load();
     if (!live) return () => { cancel = true; };
-    const timer = window.setInterval(load, 8000);
+    const timer = window.setInterval(load, 2000);
     return () => {
       cancel = true;
       window.clearInterval(timer);
