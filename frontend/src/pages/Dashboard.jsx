@@ -1308,6 +1308,7 @@ const LEDGER_CARDS = [
 
 function SheetPipeline({ date, live, revision }) {
   const [board, setBoard] = useState(null);
+  const [kind, setKind] = useState("ALL");
   const [freshWritten, setFreshWritten] = useState(() => new Set());
   const seenWritten = useRef(new Map());
   const primed = useRef(false);
@@ -1315,7 +1316,8 @@ function SheetPipeline({ date, live, revision }) {
   useEffect(() => {
     let cancel = false;
     function load() {
-      api(`/api/sheet-pipeline/?date=${encodeURIComponent(date)}`)
+      const params = new URLSearchParams({ date, type: kind });
+      api(`/api/sheet-pipeline/?${params.toString()}`)
         .then((body) => {
           if (cancel) return;
           const now = Date.now();
@@ -1344,7 +1346,7 @@ function SheetPipeline({ date, live, revision }) {
       cancel = true;
       window.clearInterval(timer);
     };
-  }, [date, live, revision]);
+  }, [date, live, revision, kind]);
 
   const received = board?.received || { got: 0, total: 0, rows: [] };
   const pending = board?.pending || { got: 0, total: 0, rows: [] };
@@ -1353,6 +1355,14 @@ function SheetPipeline({ date, live, revision }) {
 
   return (
     <section className="pipeline" aria-label="Sheet writing progress">
+      <label className="pipeline-type">
+        <span>Transaction type</span>
+        <select value={kind} onChange={(event) => setKind(event.target.value)} aria-label="Transaction type">
+          <option value="ALL">ALL</option>
+          <option value="DEPOSIT">DEPOSIT</option>
+          <option value="WITHDRAW">WITHDRAW</option>
+        </select>
+      </label>
       <PipelineColumn
         tone="received"
         title="Received from the API"

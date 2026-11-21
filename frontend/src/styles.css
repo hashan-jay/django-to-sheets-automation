@@ -2369,6 +2369,28 @@ body.modal-open {
   margin: 12px 0;
 }
 
+.pipeline-type {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.pipeline-type select {
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid #8fb892;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #f7fdf7 0%, #e5f6e4 100%);
+  color: #0f3d34;
+  font-weight: 800;
+}
+
 .pipeline-card {
   min-width: 0;
   padding: 12px;

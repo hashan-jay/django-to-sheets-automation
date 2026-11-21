@@ -172,7 +172,15 @@ class SheetPipelineView(APIView):
                 written.append(card)
             elif _show_in_received(item):
                 latest.append(card)
+        kind = (request.query_params.get("type") or "ALL").strip().upper()
+        if kind not in {"DEPOSIT", "WITHDRAW"}:
+            kind = "ALL"
         completed = [item for item in received if item.status == "COMPLETED"]
+        if kind != "ALL":
+            latest = [card for card in latest if card["type"] == kind]
+            pending = [card for card in pending if card["type"] == kind]
+            written = [card for card in written if card["type"] == kind]
+            completed = [item for item in completed if item.type == kind]
         target_count = len(pending) + len(written)
         return Response({
             "date": day.isoformat(),
