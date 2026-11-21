@@ -170,7 +170,7 @@ class SheetPipelineView(APIView):
                 pending.append(card)
             elif targets and not waiting:
                 written.append(card)
-            if _show_in_received(item):
+            elif _show_in_received(item):
                 latest.append(card)
         completed = [item for item in received if item.status == "COMPLETED"]
         target_count = len(pending) + len(written)
