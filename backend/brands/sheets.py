@@ -413,7 +413,7 @@ def start_writer() -> None:
 
 def _writer_loop() -> None:
     while True:
-        _wake.wait(timeout=2)
+        _wake.wait(timeout=1)
         _wake.clear()
         try:
             close_old_connections()
@@ -424,7 +424,7 @@ def _writer_loop() -> None:
                     continue
                 if count == 0:
                     break
-                time.sleep(1)
+                time.sleep(0.2)
             if _gateway_patch.is_set():
                 _gateway_patch.clear()
                 patch_gateway_banks()

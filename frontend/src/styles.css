@@ -2463,10 +2463,23 @@ body.modal-open {
   transition: background 140ms ease, border-color 140ms ease;
 }
 
+.pipeline-card li.is-waiting {
+  background: #d9f5df;
+  border-color: #6fbf7a;
+}
+
+.pipeline-card li.is-fresh {
+  background: #d7e8ff;
+  border-color: #5b93e6;
+}
+
 .pipeline-card li:hover {
   background: #f8fafc;
   border-color: #e2e8f0;
 }
+
+.pipeline-card li.is-waiting:hover { background: #c8efd1; }
+.pipeline-card li.is-fresh:hover { background: #c5dcff; }
 
 .pipeline-card li em {
   font-style: normal;

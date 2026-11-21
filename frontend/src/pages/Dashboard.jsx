@@ -1308,13 +1308,32 @@ const LEDGER_CARDS = [
 
 function SheetPipeline({ date, live, revision }) {
   const [board, setBoard] = useState(null);
+  const [freshWritten, setFreshWritten] = useState(() => new Set());
+  const seenWritten = useRef(new Map());
+  const primed = useRef(false);
 
   useEffect(() => {
     let cancel = false;
     function load() {
       api(`/api/sheet-pipeline/?date=${encodeURIComponent(date)}`)
         .then((body) => {
-          if (!cancel) setBoard(body);
+          if (cancel) return;
+          const now = Date.now();
+          const ids = (body?.written?.rows || []).map((row) => String(row.id));
+          if (!primed.current) {
+            for (const id of ids) seenWritten.current.set(id, 0);
+            primed.current = true;
+          }
+          for (const id of ids) {
+            if (!seenWritten.current.has(id)) seenWritten.current.set(id, now);
+          }
+          for (const [id, at] of seenWritten.current) {
+            if (now - at > 25000) seenWritten.current.delete(id);
+          }
+          setFreshWritten(new Set(
+            [...seenWritten.current.entries()].filter(([, at]) => now - at <= 20000).map(([id]) => id),
+          ));
+          setBoard(body);
         })
         .catch(() => {});
     }
@@ -1351,6 +1370,7 @@ function SheetPipeline({ date, live, revision }) {
         detail="are processing to write"
         note={sheetLine}
         rows={pending.rows}
+        mark="waiting"
         empty="No transactions are waiting to be written."
       />
       <PipelineColumn
@@ -1361,13 +1381,15 @@ function SheetPipeline({ date, live, revision }) {
         detail="are written"
         note={sheetLine}
         rows={written.rows}
+        mark="fresh"
+        freshIds={freshWritten}
         empty="No transactions have been written for this date."
       />
     </section>
   );
 }
 
-function PipelineColumn({ tone, title, got, total, detail, note, rows, empty }) {
+function PipelineColumn({ tone, title, got, total, detail, note, rows, empty, mark, freshIds }) {
   const share = total > 0 ? Math.min(100, Math.round((got / total) * 100)) : 0;
   return (
     <article className={`pipeline-card is-${tone}`}>
@@ -1381,7 +1403,16 @@ function PipelineColumn({ tone, title, got, total, detail, note, rows, empty }) 
       {rows.length === 0 ? <p className="pipeline-empty">{empty}</p> : (
         <ul>
           {rows.map((row) => (
-            <li key={`${title}-${row.brand}-${row.id}`}>
+            <li
+              key={`${title}-${row.brand}-${row.id}`}
+              className={
+                mark === "waiting"
+                  ? "is-waiting"
+                  : mark === "fresh" && freshIds?.has(String(row.id))
+                    ? "is-fresh"
+                    : ""
+              }
+            >
               <span>{row.time}</span>
               <span>{row.id}</span>
               <span>{row.name}</span>
