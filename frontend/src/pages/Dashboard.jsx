@@ -1360,6 +1360,7 @@ function SheetPipeline({ date, live, revision }) {
         total={received.total}
         detail="received by the API"
         rows={received.rows}
+        mark="unwritten"
         empty="No transactions received for this date."
       />
       <PipelineColumn
@@ -1406,7 +1407,7 @@ function PipelineColumn({ tone, title, got, total, detail, note, rows, empty, ma
             <li
               key={`${title}-${row.brand}-${row.id}`}
               className={
-                mark === "waiting"
+                mark === "waiting" || (mark === "unwritten" && row.unwritten)
                   ? "is-waiting"
                   : mark === "fresh" && freshIds?.has(String(row.id))
                     ? "is-fresh"

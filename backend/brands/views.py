@@ -165,18 +165,20 @@ class SheetPipelineView(APIView):
             sent = [row for row in targets if row.slot in exported]
             waiting = [row for row in targets if row.slot not in exported]
             card = _pipeline_card(item, sent)
+            card["unwritten"] = not (targets and not waiting)
             if targets and waiting:
                 pending.append(card)
             elif targets and not waiting:
                 written.append(card)
-            latest.append(card)
+            if _show_in_received(item):
+                latest.append(card)
         completed = [item for item in received if item.status == "COMPLETED"]
         target_count = len(pending) + len(written)
         return Response({
             "date": day.isoformat(),
             "sheets": [row.sheet_name or f"Google Sheet {row.slot}" for row in sheets],
             "received": {
-                "got": len(received),
+                "got": len(latest),
                 "total": stored.count(),
                 "rows": latest[:8],
             },
@@ -191,6 +193,21 @@ class SheetPipelineView(APIView):
                 "rows": written[:8],
             },
         })
+
+
+def _show_in_received(item: Transaction) -> bool:
+    """Received lists completed-path deposits and withdrawals only.
+
+    Rejected and other non-writing statuses stay out, and a deposit paid with
+    Manual | Online is never listed here.
+    """
+    if item.type not in {"DEPOSIT", "WITHDRAW"}:
+        return False
+    if item.status in {"REJECTED", "OTHER"}:
+        return False
+    if item.type == "DEPOSIT" and (item.method or "").strip().casefold() == "manual | online":
+        return False
+    return True
 
 
 def _write_targets(item: Transaction, sheets: list[GoogleSheetSetting]) -> list[GoogleSheetSetting]:
