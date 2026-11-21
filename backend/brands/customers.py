@@ -345,8 +345,6 @@ def _upsert(brand: Brand, users: list[dict]) -> None:
                 "visited_at",
                 "cash_site_at",
                 "cash",
-                "lifetime_deposit",
-                "lifetime_deposit_count",
                 "referrer_name",
                 "referrer_code",
                 "tags",
@@ -499,69 +497,52 @@ _recounted: set[int] = set()
 
 
 def _player_completed_total(brand: Brand, user_id: str, kind: str) -> tuple[Decimal, int] | None:
-    """Lifetime total for one player, excluding rejected withdrawals.
+    """Lifetime completed total for one player.
 
-    The brand API totalAmount and totalCount still include rejected rows, so
-    each transaction is counted on its own. userId is the brand player id.
+    The brand API returns totalAmount and totalCount for the userId filter.
+    One request is the full lifetime; rejected rows are left out by status.
     """
     if not user_id or not brand.token or not brand.merchant_id:
         return None
     url = brand.domain.rstrip("/") + "/api/v1/index.php"
-    amount = Decimal("0")
-    count = 0
-    page = 0
-    page_size = 100
-    while page < 400:
-        try:
-            body = _post(
-                url,
-                {
-                    "module": "/transactions/getAllTransactions",
-                    "accessId": brand.access_id,
-                    "accessToken": brand.token,
-                    "merchantId": brand.merchant_id,
-                    "pageIndex": str(page),
-                    "pageSize": str(page_size),
-                    "status": "COMPLETED",
-                    "type": kind,
-                    "sDate": "2000-01-01 00:00:00",
-                    "eDate": "2099-12-31 23:59:59",
-                    "userId": user_id,
-                },
-            ).json()
-        except (requests.RequestException, ValueError):
-            return None
-        if str(body.get("status") or "") != "SUCCESS":
-            return None
-        data = body.get("data") if isinstance(body.get("data"), dict) else {}
-        batch = data.get("transactions") if isinstance(data.get("transactions"), list) else []
-        for raw in batch:
-            if not isinstance(raw, dict):
-                continue
-            if str(raw.get("status") or "").strip().upper() == "REJECTED":
-                continue
-            txn_type = str(raw.get("type") or "").strip().upper()
-            if txn_type and txn_type != kind:
-                continue
-            amount += abs(_money(raw.get("cash")))
-            count += 1
-        try:
-            total_page = max(1, int(data.get("totalPage") or 1))
-        except (TypeError, ValueError):
-            total_page = 1
-        if not batch or page + 1 >= total_page:
-            break
-        page += 1
-    return amount, count
+    try:
+        body = _post(
+            url,
+            {
+                "module": "/transactions/getAllTransactions",
+                "accessId": brand.access_id,
+                "accessToken": brand.token,
+                "merchantId": brand.merchant_id,
+                "pageIndex": "0",
+                "pageSize": "1",
+                "status": "COMPLETED",
+                "type": kind,
+                "sDate": "2000-01-01 00:00:00",
+                "eDate": "2099-12-31 23:59:59",
+                "userId": user_id,
+            },
+        ).json()
+    except (requests.RequestException, ValueError):
+        return None
+    if str(body.get("status") or "") != "SUCCESS":
+        return None
+    data = body.get("data") if isinstance(body.get("data"), dict) else {}
+    try:
+        count = int(data.get("totalCount") or 0)
+    except (TypeError, ValueError):
+        count = 0
+    return abs(_money(data.get("totalAmount"))), count
 
 
 def _refresh_withdrawals(customers: list[Customer]) -> None:
-    def load(item: Customer) -> tuple[int, tuple[Decimal, int] | None]:
+    def load(item: Customer) -> tuple[int, tuple[Decimal, int] | None, tuple[Decimal, int] | None]:
         close_old_connections()
         try:
-            return item.pk, _player_completed_total(item.brand, item.external_id, "WITHDRAW")
+            deposits = _player_completed_total(item.brand, item.external_id, "DEPOSIT")
+            withdrawals = _player_completed_total(item.brand, item.external_id, "WITHDRAW")
+            return item.pk, deposits, withdrawals
         except Exception:
-            return item.pk, None
+            return item.pk, None, None
         finally:
             close_old_connections()
 
@@ -569,12 +550,11 @@ def _refresh_withdrawals(customers: list[Customer]) -> None:
     found: list[Customer] = []
     with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="lifetime-withdraw") as pool:
         for item, result in zip(customers, pool.map(load, customers)):
-            customer_id, totals = result
-            if customer_id != item.pk or totals is None:
+            customer_id, deposits, withdrawals = result
+            if customer_id != item.pk or deposits is None or withdrawals is None:
                 continue
-            amount, count = totals
-            item.lifetime_withdraw = amount
-            item.lifetime_withdraw_count = count
+            item.lifetime_deposit, item.lifetime_deposit_count = deposits
+            item.lifetime_withdraw, item.lifetime_withdraw_count = withdrawals
             found.append(item)
     if not found:
         return
@@ -585,7 +565,13 @@ def _refresh_withdrawals(customers: list[Customer]) -> None:
         item.withdraw_synced_at = stamped
     Customer.objects.bulk_update(
         found,
-        ["lifetime_withdraw", "lifetime_withdraw_count", "withdraw_synced_at"],
+        [
+            "lifetime_deposit",
+            "lifetime_deposit_count",
+            "lifetime_withdraw",
+            "lifetime_withdraw_count",
+            "withdraw_synced_at",
+        ],
     )
     _recounted.update(item.pk for item in found)
 
@@ -603,6 +589,8 @@ def _with_withdrawals(customers: list[Customer]) -> list[dict]:
     rows = []
     for item in customers:
         row = _customer_row(item)
+        row["lifetime_deposit"] = f"{item.lifetime_deposit:.2f}"
+        row["lifetime_deposit_count"] = item.lifetime_deposit_count
         row["lifetime_withdraw"] = f"{item.lifetime_withdraw:.2f}"
         row["lifetime_withdraw_count"] = item.lifetime_withdraw_count
         rows.append(row)
