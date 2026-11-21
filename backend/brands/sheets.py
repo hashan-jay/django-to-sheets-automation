@@ -630,14 +630,16 @@ def _write_cashbook(
         if _sheet_is_locked(worksheet):
             continue
         try:
-            ids = worksheet.col_values(7)
-            existing = _cashbook_ids(worksheet)
-            _clear_duplicate_ids(worksheet, ids, withdraw_start, write_deposits, write_withdrawals, deposit_end, withdraw_limit)
+            ids, existing = _tab_ids(worksheet)
+            now = time.monotonic()
+            if now - getattr(worksheet, "_kaboom_maint", 0.0) > 60:
+                _clear_duplicate_ids(worksheet, ids, withdraw_start, write_deposits, write_withdrawals, deposit_end, withdraw_limit)
+                _clear_blank_category(worksheet, ids, withdraw_start, write_deposits, write_withdrawals, deposit_end, withdraw_limit)
+                worksheet._kaboom_maint = now
             deposit_choices = _bank_dropdown(worksheet, deposit_start)
             withdraw_choices = _bank_dropdown(worksheet, withdraw_start) or deposit_choices
             _copy_owner_validation(worksheet)
             owner_choices = _owner_dropdown(worksheet)
-            _clear_blank_category(worksheet, ids, withdraw_start, write_deposits, write_withdrawals, deposit_end, withdraw_limit)
             seen: set[str] = set()
             unique_items: list[Transaction] = []
             for item in items:
@@ -666,6 +668,9 @@ def _write_cashbook(
                     withdraw_last = max(worksheet.row_count, needed_rows)
                 placed += _write_block(worksheet, ids, withdraws, withdraw_start, withdraw_last, withdraw_choices, owner_choices)
             _remember(placed, slot)
+            for item in placed:
+                existing.add(item.external_id)
+            worksheet._kaboom_ids = (ids, time.monotonic(), existing)
             written.extend(already)
             written.extend(placed)
             left = (len(deposits) + len(withdraws)) - len(placed)
@@ -790,6 +795,24 @@ def _write_payment_methods(
         if chunk:
             worksheet.batch_update(chunk, value_input_option="USER_ENTERED")
     return len(ranges)
+
+
+def _tab_ids(worksheet) -> tuple[list[str], set[str]]:
+    """One read of columns F and G, reused for the next few writes on this tab."""
+    now = time.monotonic()
+    cached = getattr(worksheet, "_kaboom_ids", None)
+    if isinstance(cached, tuple) and len(cached) == 3 and now - cached[1] < 20:
+        return cached[0], cached[2]
+    ids: list[str] = []
+    existing: set[str] = set()
+    for row in worksheet.get("F:G"):
+        status = str(row[0]).strip() if row else ""
+        txn_id = str(row[1]).strip() if len(row) > 1 else ""
+        ids.append(txn_id)
+        if status in {"Deposit", "Withdraw"} and txn_id:
+            existing.add(txn_id)
+    worksheet._kaboom_ids = (ids, now, existing)
+    return ids, existing
 
 
 def _cashbook_ids(worksheet) -> set[str]:
@@ -1259,10 +1282,14 @@ OWNER_VALID_ROW = 428
 
 def _owner_dropdown(worksheet) -> list[str]:
     """Company Owner entries from the row the sheet already accepts as valid."""
+    cached = getattr(worksheet, "_kaboom_owners", None)
+    if isinstance(cached, list):
+        return cached
     choices = _read_dropdown(worksheet, "H", OWNER_VALID_ROW, OWNER_VALID_ROW + 20)
-    if choices:
-        return choices
-    return _read_dropdown(worksheet, "H", 105, 140)
+    if not choices:
+        choices = _read_dropdown(worksheet, "H", 105, 140)
+    worksheet._kaboom_owners = choices
+    return choices
 
 
 def _validation_rule(worksheet, column: str, row: int) -> dict | None:
@@ -1288,9 +1315,13 @@ def _copy_owner_validation(worksheet) -> None:
     """Rows above 428 use another list, so the same Company Owner is marked invalid there.
 
     Apply the exact row-428 rule, including its range, to those earlier rows.
+    Once a tab has that rule, later transactions do not set it again.
     """
+    if getattr(worksheet, "_kaboom_owner_copied", False):
+        return
     rule = _validation_rule(worksheet, "H", OWNER_VALID_ROW)
     if not rule:
+        worksheet._kaboom_owner_copied = True
         return
     try:
         worksheet.spreadsheet.batch_update(
@@ -1311,6 +1342,7 @@ def _copy_owner_validation(worksheet) -> None:
                 ]
             }
         )
+        worksheet._kaboom_owner_copied = True
     except Exception as exc:
         log.warning("Company Owner dropdown update failed: %s", str(exc).splitlines()[0][:300])
 
