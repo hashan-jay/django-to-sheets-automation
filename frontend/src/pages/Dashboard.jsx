@@ -685,6 +685,9 @@ export default function Dashboard() {
                 </label>
               </div>
               <div className="sheet-row-pair is-withdraw">
+                <button
+                  type="button"
+                  className={sheet.withdrawals_enabled ? "row-write" : "row-write is-stopped"}
                   onClick={() => setRowWriting(sheet.slot, "withdrawals", !sheet.withdrawals_enabled)}
                   disabled={sheetWrites !== "" || !link}
                   aria-pressed={!sheet.withdrawals_enabled}
