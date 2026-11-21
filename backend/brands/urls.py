@@ -16,6 +16,7 @@ from brands.views import (
     GoogleSheetView,
     GoogleSheetWritesView,
     SheetAnalyticsView,
+    SheetPipelineView,
     SyncView,
     TallySystemBanksView,
     TransactionDetailView,
@@ -38,6 +39,7 @@ urlpatterns = [
     path("google-sheet/auto-sync/", GoogleSheetAutoSyncView.as_view()),
     path("google-sheet/sync/", GoogleSheetSyncView.as_view()),
     path("google-sheet/writes/", GoogleSheetWritesView.as_view()),
+    path("sheet-pipeline/", SheetPipelineView.as_view()),
     path("sheet-analytics/", SheetAnalyticsView.as_view()),
     path("banks/tally/", TallySystemBanksView.as_view()),
 ]

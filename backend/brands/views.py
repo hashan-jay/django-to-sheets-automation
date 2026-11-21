@@ -138,6 +138,97 @@ class GoogleSheetSyncView(APIView):
         return Response(result)
 
 
+class SheetPipelineView(APIView):
+    """Read-only progress of API rows, rows waiting to be written, and rows already written."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        day = _parse_day(request.query_params.get("date"))
+        sheets = [
+            row for row in GoogleSheetSetting.objects.filter(slot__in=(1, 2, 3)).order_by("slot")
+            if (row.sheet_url or "").strip() and not row.blocked
+        ]
+        stored = Transaction.objects.filter(txn_date=day, brand__is_active=True)
+        received = list(
+            stored.filter(type__in=["DEPOSIT", "WITHDRAW"])
+            .select_related("brand")
+            .prefetch_related("sheet_exports")
+            .order_by("-created_at", "-id")
+        )
+        latest = []
+        pending = []
+        written = []
+        for item in received:
+            targets = _write_targets(item, sheets)
+            exported = {mark.slot for mark in item.sheet_exports.all()}
+            sent = [row for row in targets if row.slot in exported]
+            waiting = [row for row in targets if row.slot not in exported]
+            card = _pipeline_card(item, sent)
+            if targets and waiting:
+                pending.append(card)
+            elif targets and not waiting:
+                written.append(card)
+            latest.append(card)
+        completed = [item for item in received if item.status == "COMPLETED"]
+        target_count = len(pending) + len(written)
+        return Response({
+            "date": day.isoformat(),
+            "sheets": [row.sheet_name or f"Google Sheet {row.slot}" for row in sheets],
+            "received": {
+                "got": len(received),
+                "total": stored.count(),
+                "rows": latest[:8],
+            },
+            "pending": {
+                "got": len(pending),
+                "total": target_count,
+                "rows": pending[:8],
+            },
+            "written": {
+                "got": len(written),
+                "total": target_count or len(completed),
+                "rows": written[:8],
+            },
+        })
+
+
+def _write_targets(item: Transaction, sheets: list[GoogleSheetSetting]) -> list[GoogleSheetSetting]:
+    if item.status != "COMPLETED" or item.type not in {"DEPOSIT", "WITHDRAW"}:
+        return []
+    targets = []
+    for row in sheets:
+        if item.type == "DEPOSIT" and not row.deposits_enabled:
+            continue
+        if item.type == "WITHDRAW" and not row.withdrawals_enabled:
+            continue
+        targets.append(row)
+    return targets
+
+
+def _pipeline_card(item: Transaction, sent: list[GoogleSheetSetting]) -> dict:
+    moment = item.created_at
+    when = ""
+    if moment is not None:
+        local = moment.astimezone(SYDNEY) if timezone_is_aware(moment) else moment
+        when = local.strftime("%H:%M")
+    return {
+        "id": item.external_id,
+        "brand": item.brand.name,
+        "type": item.type,
+        "status": item.status,
+        "amount": f"{item.amount:.2f}",
+        "time": when,
+        "name": item.player_name or item.username,
+        "sheets": [row.sheet_name or f"Google Sheet {row.slot}" for row in sent],
+    }
+
+
+def timezone_is_aware(moment) -> bool:
+    from django.utils import timezone
+    return timezone.is_aware(moment)
+
+
 class SheetAnalyticsView(APIView):
     """Compare saved deposits and withdrawals with the rows this app has written.
 

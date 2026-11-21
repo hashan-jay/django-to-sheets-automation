@@ -749,6 +749,7 @@ export default function Dashboard() {
       )}
     </div>
     </section>
+    <SheetPipeline date={date} live={live} revision={data?.revision || ""} />
     <BankLedger date={date} group={group} brand={brand} revision={data?.revision || ""} />
     <div className="workspace">
       <section className="main" ref={tableRef}>
@@ -1301,6 +1302,81 @@ const LEDGER_CARDS = [
   ["cash_in", "Cash in", "money"],
   ["cash_out", "Cash out", "money"],
 ];
+
+function SheetPipeline({ date, live, revision }) {
+  const [board, setBoard] = useState(null);
+
+  useEffect(() => {
+    let cancel = false;
+    function load() {
+      api(`/api/sheet-pipeline/?date=${encodeURIComponent(date)}`)
+        .then((body) => {
+          if (!cancel) setBoard(body);
+        })
+        .catch(() => {});
+    }
+    load();
+    if (!live) return () => { cancel = true; };
+    const timer = window.setInterval(load, 8000);
+    return () => {
+      cancel = true;
+      window.clearInterval(timer);
+    };
+  }, [date, live, revision]);
+
+  const received = board?.received || { got: 0, total: 0, rows: [] };
+  const pending = board?.pending || { got: 0, total: 0, rows: [] };
+  const written = board?.written || { got: 0, total: 0, rows: [] };
+  const sheetLine = (board?.sheets || []).join(", ") || "No open Google Sheet";
+
+  return (
+    <section className="pipeline" aria-label="Sheet writing progress">
+      <PipelineColumn
+        title="Received from the API"
+        stat={`${received.got.toLocaleString()} out of ${received.total.toLocaleString()} transactions received by the API`}
+        rows={received.rows}
+        empty="No transactions received for this date."
+      />
+      <PipelineColumn
+        title="Processing to the sheet"
+        stat={`${pending.got.toLocaleString()} out of ${pending.total.toLocaleString()} transactions are processing to write`}
+        note={sheetLine}
+        rows={pending.rows}
+        empty="No transactions are waiting to be written."
+      />
+      <PipelineColumn
+        title="Written on the sheet"
+        stat={`${written.got.toLocaleString()} out of ${written.total.toLocaleString()} transactions are written`}
+        note={sheetLine}
+        rows={written.rows}
+        empty="No transactions have been written for this date."
+      />
+    </section>
+  );
+}
+
+function PipelineColumn({ title, stat, note, rows, empty }) {
+  return (
+    <article className="pipeline-card">
+      <h3>{title}</h3>
+      <p>{stat}</p>
+      {note && <p className="pipeline-note">{note}</p>}
+      {rows.length === 0 ? <p className="pipeline-empty">{empty}</p> : (
+        <ul>
+          {rows.map((row) => (
+            <li key={`${title}-${row.brand}-${row.id}`}>
+              <span>{row.time}</span>
+              <span>{row.id}</span>
+              <span>{row.name}</span>
+              <span>{row.amount}</span>
+              <span>{row.type}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </article>
+  );
+}
 
 const BankLedger = memo(function BankLedger({ date, group, brand, revision }) {
   const [rows, setRows] = useState([]);
