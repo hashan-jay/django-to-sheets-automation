@@ -1563,6 +1563,8 @@ td.bank-name, td.bank-account, td.payment-method { font-weight: 700; color: #0f2
 
 .stats-brand {
   position: relative;
+  width: max-content;
+  min-width: 180px;
   margin: 0;
 }
 
@@ -1572,6 +1574,7 @@ td.bank-name, td.bank-account, td.payment-method { font-weight: 700; color: #0f2
   align-items: flex-start;
   justify-content: center;
   gap: 2px;
+  width: 100%;
   min-width: 180px;
   height: 64px;
   margin: 0;
@@ -1619,14 +1622,16 @@ td.bank-name, td.bank-account, td.payment-method { font-weight: 700; color: #0f2
 
 .stats-brand-menu {
   position: absolute;
-  z-index: 20;
-  top: calc(100% + 8px);
+  z-index: 30;
+  top: calc(100% + 4px);
+  left: 0;
   right: 0;
-  min-width: 100%;
+  width: 100%;
+  box-sizing: border-box;
   margin: 0;
   padding: 6px;
   list-style: none;
-  border: 1px solid #e2e8f0;
+  border: 1px solid #0f766e;
   border-radius: 14px;
   background: #fff;
   box-shadow: 0 16px 40px rgba(15, 39, 68, 0.14);
@@ -3368,6 +3373,15 @@ body.modal-open {
   font-variant-numeric: tabular-nums;
   font-weight: 700;
   text-align: right;
+}
+
+.customer-table tfoot td {
+  position: sticky;
+  bottom: 0;
+  background: #f3fbf3;
+  border-top: 2px solid #8fb892;
+  font-weight: 800;
+  color: #0f3d34;
 }
 
 .customer-pager {

@@ -110,6 +110,16 @@ export default function Customers() {
       return id.includes(playedNeedle) || name.includes(playedNeedle);
     });
   }, [played.rows, playedNeedle]);
+  const playedTotals = useMemo(
+    () => playedRows.reduce(
+      (sum, row) => ({
+        deposits: sum.deposits + Number(row.deposits || 0),
+        withdrawals: sum.withdrawals + Number(row.withdrawals || 0),
+      }),
+      { deposits: 0, withdrawals: 0 },
+    ),
+    [playedRows],
+  );
   const dayLabel = formatDay(date);
   const brandLabel = brand === "All" ? "all brands" : brand;
 
@@ -298,6 +308,15 @@ export default function Customers() {
                 </tr>
               ))}
             </tbody>
+            {playedRows.length > 0 && (
+              <tfoot>
+                <tr>
+                  <td colSpan={5}>Total</td>
+                  <td className="customer-count">{playedTotals.deposits.toLocaleString()}</td>
+                  <td className="customer-count">{playedTotals.withdrawals.toLocaleString()}</td>
+                </tr>
+              </tfoot>
+            )}
           </table>
           </div>
         </div>
