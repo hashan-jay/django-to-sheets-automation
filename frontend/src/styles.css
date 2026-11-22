@@ -1540,11 +1540,12 @@ td.bank-name, td.bank-account, td.payment-method { font-weight: 700; color: #0f2
 .stats-head {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   gap: 16px;
   margin-bottom: 14px;
   padding-bottom: 14px;
   border-bottom: 1px solid #eef2f6;
+  overflow: visible;
 }
 
 .stats h3 {
@@ -1563,9 +1564,12 @@ td.bank-name, td.bank-account, td.payment-method { font-weight: 700; color: #0f2
 
 .stats-brand {
   position: relative;
-  width: max-content;
-  min-width: 180px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: 180px;
   margin: 0;
+  z-index: 5;
 }
 
 .stats-brand-button {
@@ -1621,14 +1625,14 @@ td.bank-name, td.bank-account, td.payment-method { font-weight: 700; color: #0f2
 }
 
 .stats-brand-menu {
-  position: absolute;
-  z-index: 30;
-  top: calc(100% + 4px);
-  left: 0;
-  right: 0;
+  position: relative;
+  z-index: 5;
+  top: auto;
+  left: auto;
+  right: auto;
   width: 100%;
   box-sizing: border-box;
-  margin: 0;
+  margin: 4px 0 0;
   padding: 6px;
   list-style: none;
   border: 1px solid #0f766e;
