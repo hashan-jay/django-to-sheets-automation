@@ -635,9 +635,13 @@ def _write_cashbook(
             if now - getattr(worksheet, "_kaboom_maint", 0.0) > 60:
                 _clear_duplicate_ids(worksheet, ids, withdraw_start, write_deposits, write_withdrawals, deposit_end, withdraw_limit)
                 _clear_blank_category(worksheet, ids, withdraw_start, write_deposits, write_withdrawals, deposit_end, withdraw_limit)
+                deposit_choices = _bank_dropdown(worksheet, deposit_start)
+                withdraw_choices = _bank_dropdown(worksheet, withdraw_start) or deposit_choices
+                _snap_bank_spacing(worksheet, deposit_choices, withdraw_start, write_deposits, write_withdrawals, deposit_end, withdraw_limit)
                 worksheet._kaboom_maint = now
-            deposit_choices = _bank_dropdown(worksheet, deposit_start)
-            withdraw_choices = _bank_dropdown(worksheet, withdraw_start) or deposit_choices
+            else:
+                deposit_choices = _bank_dropdown(worksheet, deposit_start)
+                withdraw_choices = _bank_dropdown(worksheet, withdraw_start) or deposit_choices
             _copy_owner_validation(worksheet)
             owner_choices = _owner_dropdown(worksheet)
             seen: set[str] = set()
@@ -1122,6 +1126,7 @@ def _bank_tokens(text: str) -> tuple[str, ...]:
 
 
 _BANK_SUFFIXES = {"au", "nz", "uk", "us", "sg"}
+_BANK_FILLERS = {"abn", "acn", "pty", "ltd"}
 
 
 def _one_letter_apart(left: str, right: str) -> bool:
@@ -1167,7 +1172,9 @@ def _dropdown_score(label: str, choice: str) -> int | None:
     """Lower is a closer dropdown entry. Every transaction word must be present.
 
     The dropdown may contain extra words, as in ANZ BAILEY JAMES BROWN matching
-    ANZ ABN BAILEY JAMES BROWN. A single shared word such as ANZ is not enough.
+    ANZ ABN BAILEY JAMES BROWN, and ANZ SHANNON MAURICE HUGGARD matching
+    ANZ ABN SHANNON MAURICE HUGGARD. A filler word such as ABN does not count as a
+    different bank. A single shared word such as ANZ is not enough.
     """
     label_tokens = _bank_tokens(label)
     choice_tokens = list(_bank_tokens(choice))
@@ -1187,7 +1194,7 @@ def _dropdown_score(label: str, choice: str) -> int | None:
             return None
         fuzzy += best
         choice_tokens.pop(found)
-    extra = len(choice_tokens)
+    extra = sum(1 for token in choice_tokens if token not in _BANK_FILLERS)
     if fuzzy > 2 or extra > 4:
         return None
     return fuzzy + extra
@@ -1213,6 +1220,7 @@ def _match_bank(label: str, choices: list[str]) -> str:
 
     ANZ JOSEPH PERERA matches Joseph Perera anz. INGAU SZE LIN LAU matches ING SZE LIN LAU.
     ANZ BAILEY JAMES BROWN matches ANZ ABN BAILEY JAMES BROWN.
+    ANZ SHANNON MAURICE HUGGARD matches ANZ ABN SHANNON MAURICE HUGGARD.
     UBAU PHUONG LINH BUI matches UBANK PHUONG LINH BUI.
     """
     text = str(label or "").strip()
@@ -1224,7 +1232,10 @@ def _match_bank(label: str, choices: list[str]) -> str:
     best_choice = ""
     best_score = None
     for choice in choices:
-        if choice.strip() == text:
+        choice = choice.strip()
+        if not choice:
+            continue
+        if choice == text or choice == text.strip():
             return choice
         score = 0 if _bank_key(choice) == _bank_key(text) else _dropdown_score(text, choice)
         if score is None:
@@ -1232,7 +1243,32 @@ def _match_bank(label: str, choices: list[str]) -> str:
         if best_score is None or score < best_score:
             best_score = score
             best_choice = choice
-    return best_choice or text
+        return best_choice.strip() or text.strip()
+
+
+def _snap_bank_spacing(worksheet, choices: list[str], withdraw_start: int, write_deposits: bool, write_withdrawals: bool, deposit_end: int, withdraw_end: int) -> None:
+    """A leading space is not the dropdown entry, so Sheets refuses to select it."""
+    exact = {choice.strip(): choice.strip() for choice in choices if choice and choice.strip()}
+    if not exact:
+        return
+    ranges = []
+    for index, value in enumerate(worksheet.col_values(3), start=1):
+        text = str(value)
+        cleaned = text.strip()
+        if not cleaned or text == cleaned or cleaned not in exact:
+            continue
+        if _row_is_held(index, withdraw_start, write_deposits, write_withdrawals, deposit_end, withdraw_end):
+            continue
+        ranges.append({"range": f"C{index}", "values": [[exact[cleaned]]]})
+    for offset in range(0, len(ranges), 200):
+        chunk = ranges[offset : offset + 200]
+        if not chunk:
+            continue
+        try:
+            worksheet.batch_update(chunk, value_input_option="USER_ENTERED")
+        except Exception as exc:
+            log.warning("Bank dropdown spacing update skipped: %s", str(exc).splitlines()[0][:200])
+            return
 
 
 def _align_existing_banks(worksheet, items: list[Transaction], choices: list[str]) -> None:
