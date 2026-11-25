@@ -12,7 +12,7 @@ export default function SystemSettings() {
   const [busy, setBusy] = useState("");
 
   useEffect(() => {
-    api("/api/system-settings/")
+    api("/api/system-settings/?group=KABOOM77")
       .then((body) => applyGroups(body.groups || []))
       .catch((err) => setError(err.message));
   }, []);
@@ -53,7 +53,7 @@ export default function SystemSettings() {
       <header className="users-head">
         <div>
           <h2>System Settings</h2>
-          <p>Each main group keeps its own Google account and the brand API keys it runs.</p>
+          <p>Google account and brand API keys for KABOOM77.</p>
         </div>
       </header>
       {error && <p className="sheet-url-note is-error">{error}</p>}

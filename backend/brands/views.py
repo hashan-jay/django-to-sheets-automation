@@ -779,7 +779,10 @@ class SystemSettingsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        return Response({"groups": [_group_settings(code) for code in ("KABOOM77", "BETMETH")]})
+        code = str(request.query_params.get("group") or "KABOOM77").strip() or "KABOOM77"
+        if code != "KABOOM77":
+            code = "KABOOM77"
+        return Response({"groups": [_group_settings(code)]})
 
     def post(self, request):
         code = str(request.data.get("group") or "").strip()

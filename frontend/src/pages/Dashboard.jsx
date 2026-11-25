@@ -182,7 +182,7 @@ function BrandMenu({ value, brands, onChange }) {
 
 export default function Dashboard() {
   const [brands, setBrands] = useState([]);
-  const [group] = useState("All");
+  const [group] = useState("KABOOM77");
   const [sheets, setSheets] = useState(() => emptySheets());
   const [rowsBusy, setRowsBusy] = useState(0);
   const [sheetNote, setSheetNote] = useState("");
