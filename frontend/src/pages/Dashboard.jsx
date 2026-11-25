@@ -1355,14 +1355,22 @@ function SheetPipeline({ date, live, revision }) {
 
   return (
     <section className="pipeline" aria-label="Sheet writing progress">
-      <label className="pipeline-type">
-        <span>Transaction type</span>
-        <select value={kind} onChange={(event) => setKind(event.target.value)} aria-label="Transaction type">
-          <option value="ALL">ALL</option>
-          <option value="DEPOSIT">DEPOSIT</option>
-          <option value="WITHDRAW">WITHDRAW</option>
-        </select>
-      </label>
+      <div className="pipeline-bar">
+        <p>Sheet writing</p>
+        <div className="pipeline-type" role="group" aria-label="Transaction type">
+          {["ALL", "DEPOSIT", "WITHDRAW"].map((option) => (
+            <button
+              key={option}
+              type="button"
+              className={kind === option ? "is-selected" : ""}
+              aria-pressed={kind === option}
+              onClick={() => setKind(option)}
+            >
+              {option}
+            </button>
+          ))}
+        </div>
+      </div>
       <PipelineColumn
         tone="received"
         title="Received from the API"
@@ -1424,11 +1432,11 @@ function PipelineColumn({ tone, title, got, total, detail, note, rows, empty, ma
                     : ""
               }
             >
-              <span>{row.time}</span>
-              <span>{row.id}</span>
-              <span>{row.name}</span>
-              <strong>{row.amount}</strong>
-              <em>{row.type}</em>
+              <span className="pipeline-time">{row.time}</span>
+              <span className="pipeline-id">{row.id}</span>
+              <span className="pipeline-name">{row.name}</span>
+              <strong className="pipeline-amount">{row.amount}</strong>
+              <em className={row.type === "WITHDRAW" ? "is-withdraw" : ""}>{row.type}</em>
             </li>
           ))}
         </ul>
