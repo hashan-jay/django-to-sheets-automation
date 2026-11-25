@@ -2599,7 +2599,15 @@ body.modal-open {
 .settings-saved article header { display: flex; justify-content: space-between; align-items: center; }
 .settings-saved article p { display: flex; flex-direction: column; gap: 2px; margin: 8px 0 0; font-size: 13px; font-weight: 700; word-break: break-all; }
 .settings-key-actions { display: flex; gap: 8px; margin-top: 12px; }
-.settings-delete { color: #9f1239; }
+.settings-edit, .settings-delete {
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 999px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.settings-edit { border: 1px solid #0f766e; background: #f0fdfa; color: #0f766e; }
+.settings-delete { border: 1px solid #fecdd3; background: #fff1f2; color: #9f1239; }
 .settings-dialog { width: min(560px, calc(100vw - 32px)); }
 .settings-dialog .settings-form { grid-template-columns: 1fr; }
 .settings-groups { display: grid; grid-template-columns: 1fr; gap: 16px; }

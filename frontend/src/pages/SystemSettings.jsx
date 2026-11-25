@@ -218,8 +218,8 @@ function GroupCard({ group, email, draft, busy, onEmail, onDraft, onSave, onEdit
                 <p><span>Access ID</span>{brand.access_id || "—"}</p>
                 <p><span>Token</span>{brand.token || "—"}</p>
                 <div className="settings-key-actions">
-                  <button type="button" className="ghost" onClick={() => onEdit(brand)}>Edit</button>
-                  <button type="button" className="ghost settings-delete" onClick={() => onDelete(brand)}>Delete</button>
+                  <button type="button" className="settings-edit" onClick={() => onEdit(brand)}>Edit</button>
+                  <button type="button" className="settings-delete" onClick={() => onDelete(brand)}>Delete</button>
                 </div>
               </article>
             ))

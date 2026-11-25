@@ -2,6 +2,7 @@ import re
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
+from django.conf import settings
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -865,6 +866,7 @@ def _save_group_brand(code: str, body: dict):
             group=code,
             is_active=code == "KABOOM77",
         )
+        _write_brand_env(name, domain, access_id[:32], merchant_id[:32], token[:128])
         return None
     if previous and previous != name:
         taken = Brand.objects.filter(name=name).exclude(pk=existing.pk).exists()
@@ -879,4 +881,37 @@ def _save_group_brand(code: str, body: dict):
         existing.domain = domain
     existing.group = code
     existing.save(update_fields=["name", "access_id", "token", "merchant_id", "domain", "group"])
+    _write_brand_env(existing.name, existing.domain, existing.access_id, existing.merchant_id, existing.token)
     return None
+
+
+def _write_brand_env(name: str, domain: str, access_id: str, merchant_id: str, token: str) -> None:
+    """Keep the brand's .env lines in step with the key saved from System Settings."""
+    prefix = "".join(ch for ch in name.upper() if ch.isalnum())
+    if not prefix:
+        return
+    from pathlib import Path
+    path = Path(settings.BASE_DIR) / ".env"
+    if not path.is_file():
+        return
+    updates = {
+        f"{prefix}_DOMAIN": domain,
+        f"{prefix}_ACCESS_ID": access_id,
+        f"{prefix}_MERCHANT_ID": merchant_id,
+        f"{prefix}_TOKEN": token,
+    }
+    original = path.read_text(encoding="utf-8")
+    lines = original.splitlines()
+    seen = set()
+    written = []
+    for line in lines:
+        key = line.split("=", 1)[0].strip()
+        if key in updates:
+            written.append(f"{key}={updates[key]}")
+            seen.add(key)
+        else:
+            written.append(line)
+    for key, value in updates.items():
+        if key not in seen:
+            written.append(f"{key}={value}")
+    path.write_text("\n".join(written) + ("\n" if original.endswith("\n") else ""), encoding="utf-8")
