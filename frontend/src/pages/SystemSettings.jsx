@@ -87,44 +87,55 @@ function GroupCard({ group, email, draft, busy, onEmail, onDraft, onSave }) {
         Google account email
         <input value={email} onChange={(event) => onEmail(event.target.value)} placeholder="service-account@project.iam.gserviceaccount.com" />
       </label>
-      <h4>Brands in this group</h4>
-      {group.brands.length === 0 ? (
-        <p className="settings-empty">No brand API key is saved for this group yet.</p>
-      ) : (
-        <ul className="settings-brands">
-          {group.brands.map((brand) => (
-            <li key={brand.name}>
-              <strong>{brand.name}</strong>
-              <span>{brand.active ? "Running" : "Saved"}</span>
-              <button type="button" className="ghost" onClick={() => onDraft({ ...brand })}>Edit</button>
-            </li>
-          ))}
-        </ul>
-      )}
-      <div className="settings-form">
-        <label>
-          Brand name
-          <input value={draft.name} onChange={(event) => onDraft({ ...draft, name: event.target.value })} />
-        </label>
-        <label>
-          API domain
-          <input value={draft.domain} onChange={(event) => onDraft({ ...draft, domain: event.target.value })} placeholder="https://brand.example" />
-        </label>
-        <label>
-          Access ID
-          <input value={draft.access_id} onChange={(event) => onDraft({ ...draft, access_id: event.target.value })} />
-        </label>
-        <label>
-          Merchant ID
-          <input value={draft.merchant_id} onChange={(event) => onDraft({ ...draft, merchant_id: event.target.value })} />
-        </label>
-        <label>
-          Token
-          <input value={draft.token} onChange={(event) => onDraft({ ...draft, token: event.target.value })} />
-        </label>
-        <button type="button" className="primary" disabled={busy} onClick={() => onSave(group.code, draft)}>
-          {busy ? "Saving…" : "Save"}
-        </button>
+      <div className="settings-split">
+        <div>
+          <h4>Add or update a brand</h4>
+          <div className="settings-form">
+            <label>
+              Brand name
+              <input value={draft.name} onChange={(event) => onDraft({ ...draft, name: event.target.value })} />
+            </label>
+            <label>
+              API domain
+              <input value={draft.domain} onChange={(event) => onDraft({ ...draft, domain: event.target.value })} placeholder="https://brand.example" />
+            </label>
+            <label>
+              Access ID
+              <input value={draft.access_id} onChange={(event) => onDraft({ ...draft, access_id: event.target.value })} />
+            </label>
+            <label>
+              Merchant ID
+              <input value={draft.merchant_id} onChange={(event) => onDraft({ ...draft, merchant_id: event.target.value })} />
+            </label>
+            <label>
+              Token
+              <input value={draft.token} onChange={(event) => onDraft({ ...draft, token: event.target.value })} />
+            </label>
+            <button type="button" className="primary" disabled={busy} onClick={() => onSave(group.code, draft)}>
+              {busy ? "Saving…" : "Save"}
+            </button>
+          </div>
+        </div>
+        <aside className="settings-saved" aria-label="Saved API keys">
+          <h4>Saved API keys</h4>
+          {group.brands.length === 0 ? (
+            <p className="settings-empty">No brand API key is saved for this group yet.</p>
+          ) : (
+            group.brands.map((brand) => (
+              <article key={brand.name}>
+                <header>
+                  <strong>{brand.name}</strong>
+                  <span>{brand.active ? "Running" : "Saved"}</span>
+                </header>
+                <p><span>Brand name</span>{brand.name}</p>
+                <p><span>API domain</span>{brand.domain || "—"}</p>
+                <p><span>Access ID</span>{brand.access_id || "—"}</p>
+                <p><span>Token</span>{brand.token || "—"}</p>
+                <button type="button" className="ghost" onClick={() => onDraft({ ...brand })}>Edit</button>
+              </article>
+            ))
+          )}
+        </aside>
       </div>
     </section>
   );
