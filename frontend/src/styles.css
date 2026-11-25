@@ -2375,7 +2375,7 @@ body.modal-open {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px;
-  margin: 16px 0;
+  margin: 16px 16px 0;
 }
 
 .pipeline-bar {
