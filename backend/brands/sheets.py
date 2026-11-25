@@ -28,6 +28,7 @@ _wake = threading.Event()
 _gspread_client = None
 _open_books: dict[str, tuple[object, float]] = {}
 _quota_pause_until = 0.0
+_gap_check_at = 0.0
 _gateway_patch = threading.Event()
 _writer_started = False
 _writer_guard = threading.Lock()
@@ -393,6 +394,53 @@ def request_export() -> None:
     _wake.set()
 
 
+def _release_absent_exports() -> int:
+    """Drop write marks for today's rows that are no longer on the sheet.
+
+    The writer then sends those IDs again. One check a minute, and only the day tab.
+    """
+    global _gap_check_at
+    now = time.monotonic()
+    if now - _gap_check_at < 90 or _quota_paused():
+        return 0
+    _gap_check_at = now
+    if not _lock.acquire(blocking=False):
+        _gap_check_at = 0
+        return 0
+    released = 0
+    try:
+        day = sydney_today()
+        for row in active_sheet_settings():
+            types = _enabled_types(row)
+            if not types:
+                continue
+            try:
+                spreadsheet = _open_spreadsheet(normalize_google_sheet_id(row.sheet_url))
+                worksheet = next((item for item in _worksheets(spreadsheet) if str(item.title).strip() == str(day.day)), None)
+            except Exception as exc:
+                log.warning("%s gap check skipped: %s", sheet_label(row.slot), str(exc).splitlines()[0][:180])
+                continue
+            if worksheet is None or _sheet_is_locked(worksheet):
+                continue
+            _ids, present = _tab_ids(worksheet)
+            marks = list(
+                SheetExport.objects.filter(
+                    slot=row.slot,
+                    transaction__txn_date=day,
+                    transaction__status="COMPLETED",
+                    transaction__type__in=types,
+                ).select_related("transaction")
+            )
+            stale = [mark.pk for mark in marks if mark.transaction.external_id not in present]
+            if stale:
+                released += SheetExport.objects.filter(pk__in=stale).delete()[0]
+        if released:
+            _wake.set()
+    finally:
+        _lock.release()
+    return released
+
+
 def request_gateway_bank_patch() -> None:
     """Write AtasPay and AmoPay into the Bank column of rows already on the sheet."""
     _gateway_patch.set()
@@ -425,6 +473,7 @@ def _writer_loop() -> None:
                 if count == 0:
                     break
                 time.sleep(0.2)
+            _release_absent_exports()
             if _gateway_patch.is_set():
                 _gateway_patch.clear()
                 patch_gateway_banks()

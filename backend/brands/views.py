@@ -338,7 +338,7 @@ def _unsent_reason(item: Transaction, row: GoogleSheetSetting) -> str:
         return f"Auto Sync is off on {label}. It is sent only by Sync with Google Sheet."
     if (row.last_error or "").strip():
         return f"{label} last reported: {row.last_error.strip()[:180]}"
-    return f"Completed and not on {label} yet. The writer sends it on the next pass, unless that day's tab is locked."
+    return f"This completed row is not on {label}. Sheet Analytics lists it here until the writer adds it."
 
 
 class TallySystemBanksView(APIView):
