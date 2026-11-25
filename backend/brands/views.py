@@ -800,6 +800,20 @@ class SystemSettingsView(APIView):
                 return saved
         return Response(_group_settings(code))
 
+    def delete(self, request):
+        code = str(request.data.get("group") or "KABOOM77").strip()
+        name = str(request.data.get("name") or "").strip()
+        brand = Brand.objects.filter(group=code, name=name).first()
+        if brand is None:
+            return Response({"detail": "That API key was not found."}, status=404)
+        if brand.is_active:
+            return Response(
+                {"detail": f"{brand.name} is the running API key. It stays in place so live writing is not stopped."},
+                status=400,
+            )
+        brand.delete()
+        return Response(_group_settings(code))
+
 
 def _group_settings(code: str) -> dict:
     setting, _created = GroupSetting.objects.get_or_create(code=code)
@@ -833,7 +847,10 @@ def _save_group_brand(code: str, body: dict):
     domain = str(body.get("domain") or "").strip()
     if not name or not access_id or not token:
         return Response({"detail": "Brand name, access ID, and token are required."}, status=400)
-    existing = Brand.objects.filter(name=name).first()
+    previous = str(body.get("previous_name") or "").strip()
+    existing = Brand.objects.filter(name=previous).first() if previous else Brand.objects.filter(name=name).first()
+    if existing is None:
+        existing = Brand.objects.filter(name=name).first()
     if existing is not None and existing.group != code:
         return Response({"detail": f"{name} already belongs to {existing.group or 'another group'}."}, status=400)
     if existing is None and not domain:
@@ -849,6 +866,11 @@ def _save_group_brand(code: str, body: dict):
             is_active=code == "KABOOM77",
         )
         return None
+    if previous and previous != name:
+        taken = Brand.objects.filter(name=name).exclude(pk=existing.pk).exists()
+        if taken:
+            return Response({"detail": f"{name} is already used by another brand."}, status=400)
+        existing.name = name
     existing.access_id = access_id[:32]
     existing.token = token[:128]
     if merchant_id:
@@ -856,5 +878,5 @@ def _save_group_brand(code: str, body: dict):
     if domain:
         existing.domain = domain
     existing.group = code
-    existing.save(update_fields=["access_id", "token", "merchant_id", "domain", "group"])
+    existing.save(update_fields=["name", "access_id", "token", "merchant_id", "domain", "group"])
     return None

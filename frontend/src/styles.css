@@ -2598,7 +2598,10 @@ body.modal-open {
 }
 .settings-saved article header { display: flex; justify-content: space-between; align-items: center; }
 .settings-saved article p { display: flex; flex-direction: column; gap: 2px; margin: 8px 0 0; font-size: 13px; font-weight: 700; word-break: break-all; }
-.settings-saved article p span { color: #64748b; font-size: 11px; font-weight: 750; letter-spacing: 0.04em; text-transform: uppercase; }
+.settings-key-actions { display: flex; gap: 8px; margin-top: 12px; }
+.settings-delete { color: #9f1239; }
+.settings-dialog { width: min(560px, calc(100vw - 32px)); }
+.settings-dialog .settings-form { grid-template-columns: 1fr; }
 .settings-groups { display: grid; grid-template-columns: 1fr; gap: 16px; }
 .settings-group {
   padding: 16px;

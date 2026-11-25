@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
+import { lockPageScroll } from "./Dashboard";
 
 const EMPTY_BRAND = { name: "", domain: "", access_id: "", merchant_id: "", token: "" };
 
@@ -10,6 +11,8 @@ export default function SystemSettings() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
+  const [editing, setEditing] = useState(null);
+  const [removing, setRemoving] = useState(null);
 
   useEffect(() => {
     api("/api/system-settings/?group=KABOOM77")
@@ -48,6 +51,51 @@ export default function SystemSettings() {
     }
   }
 
+  async function saveEdit() {
+    if (!editing) return;
+    setBusy(editing.group);
+    setError("");
+    setMessage("");
+    try {
+      const saved = await api("/api/system-settings/", {
+        method: "POST",
+        body: {
+          group: editing.group,
+          google_email: emails[editing.group] || "",
+          brand: { ...editing, previous_name: editing.previous_name },
+        },
+      });
+      setGroups((current) => current.map((group) => (group.code === editing.group ? saved : group)));
+      setEditing(null);
+      setMessage("API key was updated.");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function confirmDelete() {
+    if (!removing) return;
+    setBusy(removing.group);
+    setError("");
+    setMessage("");
+    try {
+      const saved = await api("/api/system-settings/", {
+        method: "DELETE",
+        body: { group: removing.group, name: removing.name },
+      });
+      setGroups((current) => current.map((group) => (group.code === removing.group ? saved : group)));
+      setRemoving(null);
+      setMessage("API key was deleted.");
+    } catch (err) {
+      setError(err.message);
+      setRemoving(null);
+    } finally {
+      setBusy("");
+    }
+  }
+
   return (
     <main className="settings-page">
       <header className="users-head">
@@ -69,14 +117,52 @@ export default function SystemSettings() {
             onEmail={(value) => setEmails((current) => ({ ...current, [group.code]: value }))}
             onDraft={(draft) => setDrafts((current) => ({ ...current, [group.code]: draft }))}
             onSave={save}
+            onEdit={(brand) => setEditing({ ...brand, group: group.code, previous_name: brand.name })}
+            onDelete={(brand) => setRemoving({ name: brand.name, group: group.code })}
           />
         ))}
       </div>
+      {editing && (
+        <KeyDialog
+          title={`Edit ${editing.previous_name}`}
+          busy={busy === editing.group}
+          onCancel={() => { if (!busy) setEditing(null); }}
+          onSave={saveEdit}
+        >
+          <label>
+            Brand name
+            <input value={editing.name} onChange={(event) => setEditing({ ...editing, name: event.target.value })} />
+          </label>
+          <label>
+            API domain
+            <input value={editing.domain} onChange={(event) => setEditing({ ...editing, domain: event.target.value })} />
+          </label>
+          <label>
+            Access ID
+            <input value={editing.access_id} onChange={(event) => setEditing({ ...editing, access_id: event.target.value })} />
+          </label>
+          <label>
+            Merchant ID
+            <input value={editing.merchant_id} onChange={(event) => setEditing({ ...editing, merchant_id: event.target.value })} />
+          </label>
+          <label>
+            Token
+            <input value={editing.token} onChange={(event) => setEditing({ ...editing, token: event.target.value })} />
+          </label>
+        </KeyDialog>
+      )}
+      {removing && (
+        <ConfirmDelete
+          busy={busy === removing.group}
+          onYes={confirmDelete}
+          onNo={() => { if (!busy) setRemoving(null); }}
+        />
+      )}
     </main>
   );
 }
 
-function GroupCard({ group, email, draft, busy, onEmail, onDraft, onSave }) {
+function GroupCard({ group, email, draft, busy, onEmail, onDraft, onSave, onEdit, onDelete }) {
   return (
     <section className="settings-group">
       <header>
@@ -89,7 +175,7 @@ function GroupCard({ group, email, draft, busy, onEmail, onDraft, onSave }) {
       </label>
       <div className="settings-split">
         <div>
-          <h4>Add or update a brand</h4>
+          <h4>Add a brand</h4>
           <div className="settings-form">
             <label>
               Brand name
@@ -131,12 +217,46 @@ function GroupCard({ group, email, draft, busy, onEmail, onDraft, onSave }) {
                 <p><span>API domain</span>{brand.domain || "—"}</p>
                 <p><span>Access ID</span>{brand.access_id || "—"}</p>
                 <p><span>Token</span>{brand.token || "—"}</p>
-                <button type="button" className="ghost" onClick={() => onDraft({ ...brand })}>Edit</button>
+                <div className="settings-key-actions">
+                  <button type="button" className="ghost" onClick={() => onEdit(brand)}>Edit</button>
+                  <button type="button" className="ghost settings-delete" onClick={() => onDelete(brand)}>Delete</button>
+                </div>
               </article>
             ))
           )}
         </aside>
       </div>
     </section>
+  );
+}
+
+function KeyDialog({ title, busy, onCancel, onSave, children }) {
+  useEffect(() => lockPageScroll(), []);
+  return (
+    <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onCancel(); }}>
+      <div className="modal settings-dialog" role="dialog" aria-modal="true">
+        <h2>{title}</h2>
+        <div className="settings-form">{children}</div>
+        <div className="logout-actions">
+          <button type="button" className="modal-close" onClick={onCancel} disabled={busy}>Cancel</button>
+          <button type="button" className="primary" onClick={onSave} disabled={busy}>{busy ? "Saving…" : "Save"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ConfirmDelete({ busy, onYes, onNo }) {
+  useEffect(() => lockPageScroll(), []);
+  return (
+    <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onNo(); }}>
+      <div className="modal logout-dialog" role="dialog" aria-modal="true">
+        <h2>Do you really want to delete this API key?</h2>
+        <div className="logout-actions">
+          <button type="button" className="modal-close" onClick={onNo} disabled={busy}>No</button>
+          <button type="button" className="logout-yes" onClick={onYes} disabled={busy}>Yes</button>
+        </div>
+      </div>
+    </div>
   );
 }
