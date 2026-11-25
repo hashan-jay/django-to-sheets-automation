@@ -6,6 +6,7 @@ import Dashboard, { lockPageScroll } from "./pages/Dashboard";
 import Login from "./pages/Login";
 import Users from "./pages/Users";
 import SheetAnalytics from "./pages/SheetAnalytics";
+import SystemSettings from "./pages/SystemSettings";
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -57,11 +58,11 @@ export default function App() {
         <div className="top-actions">
           <button
             type="button"
-            className={`ghost${page === "analytics" ? " selected" : ""}`}
-            aria-pressed={page === "analytics"}
-            onClick={() => setPage(page === "analytics" ? "dashboard" : "analytics")}
+            className={`ghost${page === "settings" ? " selected" : ""}`}
+            aria-pressed={page === "settings"}
+            onClick={() => setPage(page === "settings" ? "dashboard" : "settings")}
           >
-            Sheet Analytics
+            System Settings
           </button>
           <button
             type="button"
@@ -95,6 +96,8 @@ export default function App() {
       </header>
       {page === "users" && user.is_staff ? (
         <Users />
+      ) : page === "settings" ? (
+        <SystemSettings />
       ) : page === "analytics" ? (
         <SheetAnalytics />
       ) : page === "customers" ? (

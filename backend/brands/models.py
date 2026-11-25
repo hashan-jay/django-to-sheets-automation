@@ -13,12 +13,14 @@ class Brand(models.Model):
     GROUP_U = "GROUP U"
     GROUP_Y = "GROUP Y"
     GROUP_KABOOM77 = "KABOOM77"
+    GROUP_BETMETH = "BETMETH"
     GROUPS = (
         (GROUP_SOLO, GROUP_SOLO),
         (GROUP_AK, GROUP_AK),
         (GROUP_U, GROUP_U),
         (GROUP_Y, GROUP_Y),
         (GROUP_KABOOM77, GROUP_KABOOM77),
+        (GROUP_BETMETH, GROUP_BETMETH),
     )
 
     name = models.CharField(max_length=64, unique=True)
@@ -35,6 +37,19 @@ class Brand(models.Model):
 
     def __str__(self) -> str:
         return self.name
+
+
+class GroupSetting(models.Model):
+    """Google account for one main group. Brands for that group stay on Brand."""
+
+    code = models.CharField(max_length=32, unique=True)
+    google_email = models.EmailField(blank=True)
+
+    class Meta:
+        ordering = ["code"]
+
+    def __str__(self) -> str:
+        return self.code
 
 
 def is_gateway_method(value: object) -> bool:

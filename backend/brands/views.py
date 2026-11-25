@@ -7,7 +7,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from brands import livecache
-from brands.models import SYDNEY, Brand, GoogleSheetSetting, Transaction, sydney_today
+from brands.models import SYDNEY, Brand, GoogleSheetSetting, GroupSetting, Transaction, sydney_today
 from brands.poller import note_watch, start_poller
 from brands.customers import customer_board, start_customer_sync
 from brands.sheets import (
@@ -760,3 +760,98 @@ def _stats_rows(rows: list[dict]) -> dict:
     stats["net_completed"] = {"count": net_count, "amount": f"{net_amount:.2f}"}
     stats["row_count"] = {"count": len(rows), "amount": "0.00"}
     return stats
+
+
+def _kaboom_google_email() -> str:
+    from brands.sheets import CREDENTIALS
+    import json
+
+    try:
+        payload = json.loads(CREDENTIALS.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    return str(payload.get("client_email") or "").strip()
+
+
+class SystemSettingsView(APIView):
+    """Group Google account and brand API keys. Does not start or stop the live writer."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return Response({"groups": [_group_settings(code) for code in ("KABOOM77", "BETMETH")]})
+
+    def post(self, request):
+        code = str(request.data.get("group") or "").strip()
+        if code not in {"KABOOM77", "BETMETH"}:
+            return Response({"detail": "Choose KABOOM77 or BETMETH."}, status=400)
+        setting, _created = GroupSetting.objects.get_or_create(code=code)
+        email = str(request.data.get("google_email") or "").strip()
+        if email:
+            setting.google_email = email
+            setting.save(update_fields=["google_email"])
+        brand_body = request.data.get("brand") if isinstance(request.data.get("brand"), dict) else {}
+        if any(str(brand_body.get(key) or "").strip() for key in ("name", "access_id", "token", "domain", "merchant_id")):
+            saved = _save_group_brand(code, brand_body)
+            if isinstance(saved, Response):
+                return saved
+        return Response(_group_settings(code))
+
+
+def _group_settings(code: str) -> dict:
+    setting, _created = GroupSetting.objects.get_or_create(code=code)
+    email = (setting.google_email or "").strip()
+    if not email and code == "KABOOM77":
+        email = _kaboom_google_email()
+    brands = Brand.objects.filter(group=code).order_by("sort_order", "name")
+    return {
+        "code": code,
+        "google_email": email,
+        "live": code == "KABOOM77",
+        "brands": [
+            {
+                "name": brand.name,
+                "domain": brand.domain,
+                "access_id": brand.access_id,
+                "merchant_id": brand.merchant_id,
+                "token": brand.token,
+                "active": brand.is_active,
+            }
+            for brand in brands
+        ],
+    }
+
+
+def _save_group_brand(code: str, body: dict):
+    name = str(body.get("name") or "").strip()
+    access_id = str(body.get("access_id") or "").strip()
+    token = str(body.get("token") or "").strip()
+    merchant_id = str(body.get("merchant_id") or "").strip()
+    domain = str(body.get("domain") or "").strip()
+    if not name or not access_id or not token:
+        return Response({"detail": "Brand name, access ID, and token are required."}, status=400)
+    existing = Brand.objects.filter(name=name).first()
+    if existing is not None and existing.group != code:
+        return Response({"detail": f"{name} already belongs to {existing.group or 'another group'}."}, status=400)
+    if existing is None and not domain:
+        return Response({"detail": "A new brand needs its API domain."}, status=400)
+    if existing is None:
+        Brand.objects.create(
+            name=name,
+            domain=domain,
+            access_id=access_id[:32],
+            merchant_id=merchant_id[:32],
+            token=token[:128],
+            group=code,
+            is_active=code == "KABOOM77",
+        )
+        return None
+    existing.access_id = access_id[:32]
+    existing.token = token[:128]
+    if merchant_id:
+        existing.merchant_id = merchant_id[:32]
+    if domain:
+        existing.domain = domain
+    existing.group = code
+    existing.save(update_fields=["access_id", "token", "merchant_id", "domain", "group"])
+    return None

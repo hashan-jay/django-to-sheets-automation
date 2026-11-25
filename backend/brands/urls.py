@@ -18,6 +18,7 @@ from brands.views import (
     SheetAnalyticsView,
     SheetPipelineView,
     SyncView,
+    SystemSettingsView,
     TallySystemBanksView,
     TransactionDetailView,
 )
@@ -40,6 +41,6 @@ urlpatterns = [
     path("google-sheet/sync/", GoogleSheetSyncView.as_view()),
     path("google-sheet/writes/", GoogleSheetWritesView.as_view()),
     path("sheet-pipeline/", SheetPipelineView.as_view()),
-    path("sheet-analytics/", SheetAnalyticsView.as_view()),
+    path("system-settings/", SystemSettingsView.as_view()),
     path("banks/tally/", TallySystemBanksView.as_view()),
 ]

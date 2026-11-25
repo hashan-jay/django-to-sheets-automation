@@ -1,0 +1,131 @@
+import { useEffect, useState } from "react";
+import { api } from "../api";
+
+const EMPTY_BRAND = { name: "", domain: "", access_id: "", merchant_id: "", token: "" };
+
+export default function SystemSettings() {
+  const [groups, setGroups] = useState([]);
+  const [drafts, setDrafts] = useState({});
+  const [emails, setEmails] = useState({});
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState("");
+
+  useEffect(() => {
+    api("/api/system-settings/")
+      .then((body) => applyGroups(body.groups || []))
+      .catch((err) => setError(err.message));
+  }, []);
+
+  function applyGroups(next) {
+    setGroups(next);
+    const emailMap = {};
+    const draftMap = {};
+    for (const group of next) {
+      emailMap[group.code] = group.google_email || "";
+      draftMap[group.code] = { ...EMPTY_BRAND };
+    }
+    setEmails(emailMap);
+    setDrafts(draftMap);
+  }
+
+  async function save(code, brand) {
+    setBusy(code);
+    setError("");
+    setMessage("");
+    try {
+      const saved = await api("/api/system-settings/", {
+        method: "POST",
+        body: { group: code, google_email: emails[code] || "", brand },
+      });
+      setGroups((current) => current.map((group) => (group.code === code ? saved : group)));
+      setDrafts((current) => ({ ...current, [code]: { ...EMPTY_BRAND } }));
+      setMessage(`${code} settings were saved.`);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  return (
+    <main className="settings-page">
+      <header className="users-head">
+        <div>
+          <h2>System Settings</h2>
+          <p>Each main group keeps its own Google account and the brand API keys it runs.</p>
+        </div>
+      </header>
+      {error && <p className="sheet-url-note is-error">{error}</p>}
+      {message && <p className="sheet-url-note is-ok">{message}</p>}
+      <div className="settings-groups">
+        {groups.map((group) => (
+          <GroupCard
+            key={group.code}
+            group={group}
+            email={emails[group.code] || ""}
+            draft={drafts[group.code] || EMPTY_BRAND}
+            busy={busy === group.code}
+            onEmail={(value) => setEmails((current) => ({ ...current, [group.code]: value }))}
+            onDraft={(draft) => setDrafts((current) => ({ ...current, [group.code]: draft }))}
+            onSave={save}
+          />
+        ))}
+      </div>
+    </main>
+  );
+}
+
+function GroupCard({ group, email, draft, busy, onEmail, onDraft, onSave }) {
+  return (
+    <section className="settings-group">
+      <header>
+        <h3>{group.code}</h3>
+        <span>{group.live ? "Live group" : "Saved only, not writing yet"}</span>
+      </header>
+      <label>
+        Google account email
+        <input value={email} onChange={(event) => onEmail(event.target.value)} placeholder="service-account@project.iam.gserviceaccount.com" />
+      </label>
+      <h4>Brands in this group</h4>
+      {group.brands.length === 0 ? (
+        <p className="settings-empty">No brand API key is saved for this group yet.</p>
+      ) : (
+        <ul className="settings-brands">
+          {group.brands.map((brand) => (
+            <li key={brand.name}>
+              <strong>{brand.name}</strong>
+              <span>{brand.active ? "Running" : "Saved"}</span>
+              <button type="button" className="ghost" onClick={() => onDraft({ ...brand })}>Edit</button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="settings-form">
+        <label>
+          Brand name
+          <input value={draft.name} onChange={(event) => onDraft({ ...draft, name: event.target.value })} />
+        </label>
+        <label>
+          API domain
+          <input value={draft.domain} onChange={(event) => onDraft({ ...draft, domain: event.target.value })} placeholder="https://brand.example" />
+        </label>
+        <label>
+          Access ID
+          <input value={draft.access_id} onChange={(event) => onDraft({ ...draft, access_id: event.target.value })} />
+        </label>
+        <label>
+          Merchant ID
+          <input value={draft.merchant_id} onChange={(event) => onDraft({ ...draft, merchant_id: event.target.value })} />
+        </label>
+        <label>
+          Token
+          <input value={draft.token} onChange={(event) => onDraft({ ...draft, token: event.target.value })} />
+        </label>
+        <button type="button" className="primary" disabled={busy} onClick={() => onSave(group.code, draft)}>
+          {busy ? "Saving…" : "Save"}
+        </button>
+      </div>
+    </section>
+  );
+}
