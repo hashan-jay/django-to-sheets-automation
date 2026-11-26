@@ -15,10 +15,40 @@ export default function SystemSettings({ group = "KABOOM77" }) {
   const [removing, setRemoving] = useState(null);
 
   useEffect(() => {
-    api(`/api/system-settings/?group=${encodeURIComponent(group)}`)
-      .then((body) => applyGroups(body.groups || []))
-      .catch((err) => setError(err.message));
+    let stopped = false;
+    function load() {
+      api(`/api/system-settings/?group=${encodeURIComponent(group)}`)
+        .then((body) => {
+          if (!stopped) setGroups(body.groups || []);
+        })
+        .catch((err) => {
+          if (!stopped) setError(err.message);
+        });
+    }
+    load();
+    const timer = window.setInterval(load, 8000);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
   }, [group]);
+
+  useEffect(() => {
+    setEmails((current) => {
+      const next = { ...current };
+      for (const item of groups) {
+        if (next[item.code] === undefined) next[item.code] = item.google_email || "";
+      }
+      return next;
+    });
+    setDrafts((current) => {
+      const next = { ...current };
+      for (const item of groups) {
+        if (!next[item.code]) next[item.code] = { ...EMPTY_BRAND };
+      }
+      return next;
+    });
+  }, [groups]);
 
   function applyGroups(next) {
     setGroups(next);
@@ -213,6 +243,7 @@ function GroupCard({ group, email, draft, busy, onEmail, onDraft, onSave, onEdit
                   <strong>{brand.name}</strong>
                   <span>{brand.active ? "Running" : "Saved"}</span>
                 </header>
+                {brand.error ? <p className="settings-api-error">{brand.error}</p> : null}
                 <p><span>Brand name</span>{brand.name}</p>
                 <p><span>API domain</span>{brand.domain || "—"}</p>
                 <p><span>Access ID</span>{brand.access_id || "—"}</p>

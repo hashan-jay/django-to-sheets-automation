@@ -25,7 +25,7 @@ _GID_RE = re.compile(r"[?#&]gid=(\d+)")
 _lock = threading.Lock()
 _book_lock = threading.Lock()
 _wake = threading.Event()
-_gspread_client = None
+_gspread_clients: dict[str, object] = {}
 _open_books: dict[str, tuple[object, float]] = {}
 _quota_pause_until = 0.0
 _gap_check_at = 0.0
@@ -33,7 +33,19 @@ _gateway_patch = threading.Event()
 _writer_started = False
 _writer_guard = threading.Lock()
 
-CREDENTIALS = Path(settings.BASE_DIR).parent / "secrets" / "google-sheets.json"
+SECRETS = Path(settings.BASE_DIR).parent / "secrets"
+CREDENTIALS = SECRETS / "google-sheets.json"
+
+
+def credentials_path(group: str = "KABOOM77") -> Path:
+    """KABOOM77 keeps secrets/google-sheets.json. Every other group uses secrets/<group>.json."""
+    code = (group or "KABOOM77").strip() or "KABOOM77"
+    if code.casefold() == "kaboom77":
+        return CREDENTIALS
+    slug = "".join(ch.lower() if ch.isalnum() else "-" for ch in code).strip("-")
+    while "--" in slug:
+        slug = slug.replace("--", "-")
+    return SECRETS / f"{slug or 'group'}.json"
 DEFAULT_SHEET_URL = (
     "https://docs.google.com/spreadsheets/d/1AsiDeo0e08NEehnnsJZGd29dVXLIMlQ-KaUF_-mW-zY/edit?gid=2040112683"
 )
@@ -120,7 +132,7 @@ def save_sheet_url(raw: str, slot_raw=1, group: str = "KABOOM77") -> GoogleSheet
     if clean and gid is not None:
         clean = f"{clean}/edit?gid={gid}"
     row.sheet_url = clean
-    row.sheet_name = _spreadsheet_title(sheet_id) if sheet_id else ""
+    row.sheet_name = _spreadsheet_title(sheet_id, group) if sheet_id else ""
     row.last_error = ""
     row.save(update_fields=["sheet_url", "sheet_name", "last_error", "updated_at"])
     return row
@@ -250,11 +262,11 @@ def _sheet_public(row: GoogleSheetSetting) -> dict:
     }
 
 
-def _spreadsheet_title(sheet_id: str) -> str:
+def _spreadsheet_title(sheet_id: str, group: str = "KABOOM77") -> str:
     if not sheet_id:
         return ""
     try:
-        return str(_open_spreadsheet(sheet_id).title or "").strip()[:200]
+        return str(_open_spreadsheet(sheet_id, group).title or "").strip()[:200]
     except Exception as exc:
         log.warning("Google Sheet title lookup failed: %s", str(exc).splitlines()[0][:300])
         return ""
@@ -264,7 +276,7 @@ def _fill_missing_sheet_names() -> None:
     for row in GoogleSheetSetting.objects.filter(slot__in=SHEET_SLOTS):
         if row.sheet_name or not normalize_google_sheet_id(row.sheet_url):
             continue
-        title = _spreadsheet_title(normalize_google_sheet_id(row.sheet_url))
+        title = _spreadsheet_title(normalize_google_sheet_id(row.sheet_url), row.group or "KABOOM77")
         if not title:
             continue
         GoogleSheetSetting.objects.filter(pk=row.pk, sheet_name="").update(sheet_name=title)
@@ -321,7 +333,7 @@ def _sync_brands_for_day(day, slot: int, group: str = "KABOOM77") -> dict:
         .select_related("brand")
         .order_by("created_at", "id")
     )
-    spreadsheet = _open_spreadsheet(sheet_id)
+    spreadsheet = _open_spreadsheet(sheet_id, group)
     title = str(day.day)
     worksheet = next((item for item in _worksheets(spreadsheet) if str(item.title).strip() == title), None)
     removed = (
@@ -420,7 +432,7 @@ def _release_absent_exports() -> int:
             if not types:
                 continue
             try:
-                spreadsheet = _open_spreadsheet(normalize_google_sheet_id(row.sheet_url))
+                spreadsheet = _open_spreadsheet(normalize_google_sheet_id(row.sheet_url), row.group or "KABOOM77")
                 worksheet = next((item for item in _worksheets(spreadsheet) if str(item.title).strip() == str(day.day)), None)
             except Exception as exc:
                 log.warning("%s gap check skipped: %s", sheet_label(row.slot), str(exc).splitlines()[0][:180])
@@ -434,6 +446,7 @@ def _release_absent_exports() -> int:
                     transaction__txn_date=day,
                     transaction__status="COMPLETED",
                     transaction__type__in=types,
+                    transaction__brand__group=row.group or "KABOOM77",
                 ).select_related("transaction")
             )
             stale = [mark.pk for mark in marks if mark.transaction.external_id not in present]
@@ -520,7 +533,7 @@ def _export_pending(limit: int, only_slot: int | None = None, group: str | None 
         if not pending:
             continue
         try:
-            spreadsheet = _open_spreadsheet(normalize_google_sheet_id(row.sheet_url))
+            spreadsheet = _open_spreadsheet(normalize_google_sheet_id(row.sheet_url), row.group or "KABOOM77")
             written, errors = _write_cashbook(
                 spreadsheet,
                 pending,
@@ -637,21 +650,24 @@ def _worksheets(spreadsheet):
     return tabs
 
 
-def _open_spreadsheet(sheet_id: str):
-    global _gspread_client
-    if not CREDENTIALS.is_file():
-        raise FileNotFoundError(f"Service account key is missing: {CREDENTIALS}")
+def _open_spreadsheet(sheet_id: str, group: str = "KABOOM77"):
+    key_path = credentials_path(group)
+    if not key_path.is_file():
+        raise FileNotFoundError(f"Service account key is missing: {key_path}")
     import gspread
 
     now = time.monotonic()
+    cache_key = f"{key_path}|{sheet_id}"
     with _book_lock:
-        cached = _open_books.get(sheet_id)
+        cached = _open_books.get(cache_key)
         if cached and now - cached[1] < 600:
             return cached[0]
-        if _gspread_client is None:
-            _gspread_client = gspread.service_account(filename=str(CREDENTIALS))
-        book = _gspread_client.open_by_key(sheet_id)
-        _open_books[sheet_id] = (book, now)
+        client = _gspread_clients.get(str(key_path))
+        if client is None:
+            client = gspread.service_account(filename=str(key_path))
+            _gspread_clients[str(key_path)] = client
+        book = client.open_by_key(sheet_id)
+        _open_books[cache_key] = (book, now)
         return book
 
 
@@ -1035,7 +1051,7 @@ def patch_gateway_banks() -> int:
             return 0
         updated = 0
         for row in sheets:
-            spreadsheet = _open_spreadsheet(normalize_google_sheet_id(row.sheet_url))
+            spreadsheet = _open_spreadsheet(normalize_google_sheet_id(row.sheet_url), row.group or "KABOOM77")
             tabs = {str(worksheet.title).strip(): worksheet for worksheet in _worksheets(spreadsheet)}
             grouped: dict[str, list[Transaction]] = {}
             for item in items:
@@ -1530,7 +1546,7 @@ def repair_written_columns() -> int:
         )
         if not exported:
             continue
-        spreadsheet = _open_spreadsheet(normalize_google_sheet_id(row.sheet_url))
+        spreadsheet = _open_spreadsheet(normalize_google_sheet_id(row.sheet_url), row.group or "KABOOM77")
         tabs = {str(worksheet.title).strip(): worksheet for worksheet in _worksheets(spreadsheet)}
         grouped: dict[str, list[Transaction]] = {}
         for mark in exported:

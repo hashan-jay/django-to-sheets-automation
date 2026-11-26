@@ -8,7 +8,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from brands import livecache
-from brands.models import SYDNEY, Brand, GoogleSheetSetting, GroupSetting, Transaction, sydney_today
+from brands.models import SYDNEY, Brand, BrandSync, GoogleSheetSetting, GroupSetting, Transaction, sydney_today
 from brands.poller import note_watch, start_poller
 from brands.customers import customer_board, start_customer_sync
 from brands.sheets import (
@@ -772,12 +772,12 @@ def _stats_rows(rows: list[dict]) -> dict:
     return stats
 
 
-def _kaboom_google_email() -> str:
-    from brands.sheets import CREDENTIALS
+def _group_google_email(code: str) -> str:
+    from brands.sheets import credentials_path
     import json
 
     try:
-        payload = json.loads(CREDENTIALS.read_text(encoding="utf-8"))
+        payload = json.loads(credentials_path(code).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return ""
     return str(payload.get("client_email") or "").strip()
@@ -854,9 +854,13 @@ class SystemSettingsView(APIView):
 def _group_settings(code: str) -> dict:
     setting, _created = GroupSetting.objects.get_or_create(code=code)
     email = (setting.google_email or "").strip()
-    if not email and code == "KABOOM77":
-        email = _kaboom_google_email()
+    if not email:
+        email = _group_google_email(code)
     brands = Brand.objects.filter(group=code).order_by("sort_order", "name")
+    latest = {
+        item.brand_id: item
+        for item in BrandSync.objects.filter(brand__in=brands).order_by("day", "updated_at")
+    }
     return {
         "code": code,
         "google_email": email,
@@ -869,6 +873,7 @@ def _group_settings(code: str) -> dict:
                 "merchant_id": brand.merchant_id,
                 "token": brand.token,
                 "active": brand.is_active,
+                "error": (latest.get(brand.pk).message or "").strip()[:300] if latest.get(brand.pk) else "",
             }
             for brand in brands
         ],

@@ -2613,6 +2613,7 @@ body.modal-open {
   background: #f8fafc;
 }
 .settings-saved article header { display: flex; justify-content: space-between; align-items: center; }
+.settings-api-error { margin: 8px 0 0; color: #b42318; font-size: 13px; font-weight: 700; line-height: 1.4; }
 .settings-saved article p { display: flex; flex-direction: column; gap: 2px; margin: 8px 0 0; font-size: 13px; font-weight: 700; word-break: break-all; }
 .settings-key-actions { display: flex; gap: 8px; margin-top: 12px; }
 .settings-edit, .settings-delete {
