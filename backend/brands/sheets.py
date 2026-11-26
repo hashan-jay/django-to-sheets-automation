@@ -37,8 +37,7 @@ SECRETS = Path(settings.BASE_DIR).parent / "secrets"
 CREDENTIALS = SECRETS / "google-sheets.json"
 
 
-def credentials_path(group: str = "KABOOM77") -> Path:
-    """KABOOM77 keeps secrets/google-sheets.json. Every other group uses secrets/<group>.json."""
+def _default_credentials(group: str) -> Path:
     code = (group or "KABOOM77").strip() or "KABOOM77"
     if code.casefold() == "kaboom77":
         return CREDENTIALS
@@ -46,6 +45,48 @@ def credentials_path(group: str = "KABOOM77") -> Path:
     while "--" in slug:
         slug = slug.replace("--", "-")
     return SECRETS / f"{slug or 'group'}.json"
+
+
+def secrets_json(name: str) -> Path | None:
+    """A JSON file name that stays inside the secrets folder. Paths are rejected."""
+    text = str(name or "").strip()
+    if not text or Path(text).name != text or ".." in text:
+        return None
+    if not text.lower().endswith(".json"):
+        return None
+    path = (SECRETS / text).resolve()
+    try:
+        path.relative_to(SECRETS.resolve())
+    except ValueError:
+        return None
+    if path.parent != SECRETS.resolve():
+        return None
+    return path
+
+
+def credentials_path(group: str = "KABOOM77") -> Path:
+    """Use the saved secrets file when it is present. Otherwise keep the existing key."""
+    code = (group or "KABOOM77").strip() or "KABOOM77"
+    default = _default_credentials(code)
+    saved = ""
+    try:
+        from brands.models import GroupSetting
+
+        saved = GroupSetting.objects.filter(code=code).values_list("credentials_file", flat=True).first() or ""
+    except Exception:
+        return default
+    chosen = secrets_json(saved)
+    if chosen is not None and chosen.is_file():
+        return chosen
+    return default
+
+
+def credentials_file_status(name: str) -> str:
+    path = secrets_json(name)
+    if path is None or not path.is_file():
+        return "missing"
+    return "found"
+
 DEFAULT_SHEET_URL = (
     "https://docs.google.com/spreadsheets/d/1AsiDeo0e08NEehnnsJZGd29dVXLIMlQ-KaUF_-mW-zY/edit?gid=2040112683"
 )

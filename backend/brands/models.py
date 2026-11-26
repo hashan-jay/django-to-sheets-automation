@@ -44,6 +44,7 @@ class GroupSetting(models.Model):
 
     code = models.CharField(max_length=32, unique=True)
     google_email = models.EmailField(blank=True)
+    credentials_file = models.CharField(max_length=128, blank=True)
 
     class Meta:
         ordering = ["code"]

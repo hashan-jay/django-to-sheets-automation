@@ -2613,7 +2613,11 @@ body.modal-open {
   background: #f8fafc;
 }
 .settings-saved article header { display: flex; justify-content: space-between; align-items: center; }
-.settings-api-error { margin: 8px 0 0; color: #b42318; font-size: 13px; font-weight: 700; line-height: 1.4; }
+.settings-file-save { margin-top: 8px; }
+.settings-file-found { margin: 8px 0 0; color: #067647; font-size: 13px; font-weight: 800; }
+.settings-file-missing { margin: 8px 0 0; color: #b42318; font-size: 13px; font-weight: 800; }
+.settings-account { display: flex; flex-direction: column; gap: 2px; margin: 8px 0 0; font-size: 13px; font-weight: 700; }
+.settings-account span { color: #64748b; font-size: 12px; }
 .settings-saved article p { display: flex; flex-direction: column; gap: 2px; margin: 8px 0 0; font-size: 13px; font-weight: 700; word-break: break-all; }
 .settings-key-actions { display: flex; gap: 8px; margin-top: 12px; }
 .settings-edit, .settings-delete {

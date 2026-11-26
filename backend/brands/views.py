@@ -772,12 +772,15 @@ def _stats_rows(rows: list[dict]) -> dict:
     return stats
 
 
-def _group_google_email(code: str) -> str:
-    from brands.sheets import credentials_path
+def _group_google_email(filename: str) -> str:
+    from brands.sheets import secrets_json
     import json
 
+    path = secrets_json(filename)
+    if path is None or not path.is_file():
+        return ""
     try:
-        payload = json.loads(credentials_path(code).read_text(encoding="utf-8"))
+        payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return ""
     return str(payload.get("client_email") or "").strip()
@@ -825,10 +828,15 @@ class SystemSettingsView(APIView):
         if not code or not GroupSetting.objects.filter(code=code).exists():
             return Response({"detail": "Choose a group that exists."}, status=400)
         setting, _created = GroupSetting.objects.get_or_create(code=code)
-        email = str(request.data.get("google_email") or "").strip()
-        if email:
-            setting.google_email = email
-            setting.save(update_fields=["google_email"])
+        if "credentials_file" in request.data:
+            filename = str(request.data.get("credentials_file") or "").strip()
+            if not filename:
+                return Response({"detail": "Enter the JSON file name."}, status=400)
+            from brands.sheets import secrets_json
+            if secrets_json(filename) is None:
+                return Response({"detail": "Enter only the file name from the secrets folder, ending in .json."}, status=400)
+            setting.credentials_file = filename
+            setting.save(update_fields=["credentials_file"])
         brand_body = request.data.get("brand") if isinstance(request.data.get("brand"), dict) else {}
         if any(str(brand_body.get(key) or "").strip() for key in ("name", "access_id", "token", "domain", "merchant_id")):
             saved = _save_group_brand(code, brand_body)
@@ -853,9 +861,10 @@ class SystemSettingsView(APIView):
 
 def _group_settings(code: str) -> dict:
     setting, _created = GroupSetting.objects.get_or_create(code=code)
-    email = (setting.google_email or "").strip()
-    if not email:
-        email = _group_google_email(code)
+    filename = (setting.credentials_file or "").strip()
+    from brands.sheets import credentials_file_status
+    file_status = credentials_file_status(filename) if filename else ""
+    email = _group_google_email(filename) if file_status == "found" else ""
     brands = Brand.objects.filter(group=code).order_by("sort_order", "name")
     latest = {
         item.brand_id: item
@@ -863,6 +872,8 @@ def _group_settings(code: str) -> dict:
     }
     return {
         "code": code,
+        "credentials_file": filename,
+        "file_status": file_status,
         "google_email": email,
         "live": code == "KABOOM77",
         "brands": [

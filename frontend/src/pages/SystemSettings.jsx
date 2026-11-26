@@ -7,7 +7,7 @@ const EMPTY_BRAND = { name: "", domain: "", access_id: "", merchant_id: "", toke
 export default function SystemSettings({ group = "KABOOM77" }) {
   const [groups, setGroups] = useState([]);
   const [drafts, setDrafts] = useState({});
-  const [emails, setEmails] = useState({});
+  const [files, setFiles] = useState({});
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
@@ -34,10 +34,10 @@ export default function SystemSettings({ group = "KABOOM77" }) {
   }, [group]);
 
   useEffect(() => {
-    setEmails((current) => {
+    setFiles((current) => {
       const next = { ...current };
       for (const item of groups) {
-        if (next[item.code] === undefined) next[item.code] = item.google_email || "";
+        if (next[item.code] === undefined) next[item.code] = item.credentials_file || "";
       }
       return next;
     });
@@ -52,13 +52,13 @@ export default function SystemSettings({ group = "KABOOM77" }) {
 
   function applyGroups(next) {
     setGroups(next);
-    const emailMap = {};
+    const fileMap = {};
     const draftMap = {};
     for (const group of next) {
-      emailMap[group.code] = group.google_email || "";
+      fileMap[group.code] = group.credentials_file || "";
       draftMap[group.code] = { ...EMPTY_BRAND };
     }
-    setEmails(emailMap);
+    setFiles(fileMap);
     setDrafts(draftMap);
   }
 
@@ -69,7 +69,7 @@ export default function SystemSettings({ group = "KABOOM77" }) {
     try {
       const saved = await api("/api/system-settings/", {
         method: "POST",
-        body: { group: code, google_email: emails[code] || "", brand },
+        body: { group: code, brand },
       });
       setGroups((current) => current.map((group) => (group.code === code ? saved : group)));
       setDrafts((current) => ({ ...current, [code]: { ...EMPTY_BRAND } }));
@@ -91,13 +91,30 @@ export default function SystemSettings({ group = "KABOOM77" }) {
         method: "POST",
         body: {
           group: editing.group,
-          google_email: emails[editing.group] || "",
           brand: { ...editing, previous_name: editing.previous_name },
         },
       });
       setGroups((current) => current.map((group) => (group.code === editing.group ? saved : group)));
       setEditing(null);
       setMessage("API key was updated.");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function saveFile(code) {
+    setBusy(code);
+    setError("");
+    setMessage("");
+    try {
+      const saved = await api("/api/system-settings/", {
+        method: "POST",
+        body: { group: code, credentials_file: (files[code] || "").trim() },
+      });
+      setGroups((current) => current.map((item) => (item.code === code ? saved : item)));
+      setFiles((current) => ({ ...current, [code]: saved.credentials_file || "" }));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -141,12 +158,13 @@ export default function SystemSettings({ group = "KABOOM77" }) {
           <GroupCard
             key={group.code}
             group={group}
-            email={emails[group.code] || ""}
+            email={files[group.code] || ""}
             draft={drafts[group.code] || EMPTY_BRAND}
             busy={busy === group.code}
-            onEmail={(value) => setEmails((current) => ({ ...current, [group.code]: value }))}
+            onEmail={(value) => setFiles((current) => ({ ...current, [group.code]: value }))}
             onDraft={(draft) => setDrafts((current) => ({ ...current, [group.code]: draft }))}
             onSave={save}
+            onSaveFile={saveFile}
             onEdit={(brand) => setEditing({ ...brand, group: group.code, previous_name: brand.name })}
             onDelete={(brand) => setRemoving({ name: brand.name, group: group.code })}
           />
@@ -192,7 +210,10 @@ export default function SystemSettings({ group = "KABOOM77" }) {
   );
 }
 
-function GroupCard({ group, email, draft, busy, onEmail, onDraft, onSave, onEdit, onDelete }) {
+function GroupCard({ group, email, draft, busy, onEmail, onDraft, onSave, onSaveFile, onEdit, onDelete }) {
+  const savedName = group.credentials_file || "";
+  const typed = email.trim();
+  const showStatus = savedName && typed === savedName;
   return (
     <section className="settings-group">
       <header>
@@ -200,9 +221,17 @@ function GroupCard({ group, email, draft, busy, onEmail, onDraft, onSave, onEdit
         <span>{group.live ? "Live group" : "Saved only, not writing yet"}</span>
       </header>
       <label>
-        Google account email
-        <input value={email} onChange={(event) => onEmail(event.target.value)} placeholder="service-account@project.iam.gserviceaccount.com" />
+        JSON file name
+        <input value={email} onChange={(event) => onEmail(event.target.value)} placeholder="betmeth.json" />
       </label>
+      <button type="button" className="primary settings-file-save" disabled={busy || !typed} onClick={() => onSaveFile(group.code)}>
+        {busy ? "Saving…" : "Save"}
+      </button>
+      {showStatus && group.file_status === "found" && <p className="settings-file-found">FILE FOUND</p>}
+      {showStatus && group.file_status === "missing" && <p className="settings-file-missing">The file is missing.</p>}
+      {showStatus && group.file_status === "found" && group.google_email && (
+        <p className="settings-account"><span>Google service account</span>{group.google_email}</p>
+      )}
       <div className="settings-split">
         <div>
           <h4>Add a brand</h4>
