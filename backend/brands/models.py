@@ -28,7 +28,7 @@ class Brand(models.Model):
     access_id = models.CharField(max_length=32)
     merchant_id = models.CharField(max_length=32, blank=True)
     token = models.CharField(max_length=128)
-    group = models.CharField(max_length=32, blank=True, choices=GROUPS)
+    group = models.CharField(max_length=64, blank=True)
     is_active = models.BooleanField(default=True)
     sort_order = models.PositiveIntegerField(default=0)
 
@@ -263,7 +263,8 @@ class GoogleSheetSetting(models.Model):
     Deposit and withdrawal start rows are shared and stored on slot 1.
     """
 
-    slot = models.PositiveSmallIntegerField(default=1, unique=True)
+    slot = models.PositiveSmallIntegerField(default=1)
+    group = models.CharField(max_length=64, default="KABOOM77")
     sheet_url = models.URLField(max_length=500, blank=True)
     sheet_name = models.CharField(max_length=200, blank=True, default="")
     blocked = models.BooleanField(default=False)
@@ -279,7 +280,10 @@ class GoogleSheetSetting(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        ordering = ["slot"]
+        ordering = ["group", "slot"]
+        constraints = [
+            models.UniqueConstraint(fields=["group", "slot"], name="uniq_group_sheet_slot"),
+        ]
 
     def __str__(self) -> str:
         return self.sheet_url or f"Google Sheet {self.slot}"

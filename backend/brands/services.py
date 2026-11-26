@@ -18,7 +18,7 @@ from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from brands import livecache
-from brands.models import SYDNEY, BankLedgerSetting, BankTransfer, Brand, BrandSync, CompanyBank, Transaction, _clock, is_gateway_method, sydney_today
+from brands.models import SYDNEY, BankLedgerSetting, BankTransfer, Brand, BrandSync, CompanyBank, GroupSetting, Transaction, _clock, is_gateway_method, sydney_today
 
 UTC = ZoneInfo("UTC")
 
@@ -937,8 +937,7 @@ def _ledger_scope(group_name: str, brand_name: str) -> tuple[Brand | None, list[
     """
     group_name = (group_name or "All").strip() or "All"
     brand_name = (brand_name or "All").strip() or "All"
-    known = {choice for choice, _label in Brand.GROUPS}
-    if group_name != "All" and group_name not in known:
+    if group_name != "All" and not GroupSetting.objects.filter(code=group_name).exists() and group_name not in {choice for choice, _label in Brand.GROUPS}:
         return None, None, True
     if brand_name != "All":
         brand, missing = _ledger_brand(brand_name)

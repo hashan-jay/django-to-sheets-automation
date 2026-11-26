@@ -12,6 +12,12 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [ready, setReady] = useState(false);
   const [page, setPage] = useState("dashboard");
+  const [groups, setGroups] = useState(["KABOOM77"]);
+  const [group, setGroup] = useState(() => localStorage.getItem("kaboom-group") || "KABOOM77");
+  const [addStep, setAddStep] = useState("");
+  const [groupName, setGroupName] = useState("");
+  const [groupError, setGroupError] = useState("");
+  const [creating, setCreating] = useState(false);
   const [confirmLogout, setConfirmLogout] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
 
@@ -25,6 +31,44 @@ export default function App() {
       .catch(() => setToken(""))
       .finally(() => setReady(true));
   }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    api("/api/groups/")
+      .then((body) => {
+        const names = body.groups || [];
+        setGroups(names.length ? names : ["KABOOM77"]);
+        if (names.length && !names.includes(group)) {
+          setGroup("KABOOM77");
+          localStorage.setItem("kaboom-group", "KABOOM77");
+        }
+      })
+      .catch(() => {});
+  }, [user, group]);
+
+  function chooseGroup(code) {
+    setGroup(code);
+    localStorage.setItem("kaboom-group", code);
+    setPage("dashboard");
+  }
+
+  async function createGroup() {
+    const name = groupName.trim();
+    if (!name) return;
+    setCreating(true);
+    setGroupError("");
+    try {
+      const saved = await api("/api/groups/", { method: "POST", body: { name } });
+      setGroups((current) => [...current.filter((item) => item !== saved.code), saved.code]);
+      chooseGroup(saved.code);
+      setAddStep("");
+      setGroupName("");
+    } catch (err) {
+      setGroupError(err.message);
+    } finally {
+      setCreating(false);
+    }
+  }
 
   async function logout() {
     setLoggingOut(true);
@@ -51,9 +95,22 @@ export default function App() {
       <header className="topbar">
         <div className="brand-lockup">
           <button type="button" className="brand-home" onClick={() => setPage("dashboard")}>
-            <h1>KABOOM77</h1>
-            <p>Live deposits and withdrawals for KABOOM77.</p>
+            <h1>{group}</h1>
+            <p>Live deposits and withdrawals for {group}.</p>
           </button>
+          <div className="group-switch" role="group" aria-label="Groups">
+            {groups.map((code) => (
+              <button
+                key={code}
+                type="button"
+                className={code === group ? "is-selected" : ""}
+                onClick={() => chooseGroup(code)}
+              >
+                {code}
+              </button>
+            ))}
+            <button type="button" className="group-add" aria-label="Add group" onClick={() => { setGroupError(""); setAddStep("ask"); }}>+</button>
+          </div>
         </div>
         <div className="top-actions">
           <button
@@ -97,15 +154,35 @@ export default function App() {
       {page === "users" && user.is_staff ? (
         <Users />
       ) : page === "settings" ? (
-        <SystemSettings />
+        <SystemSettings group={group} />
       ) : page === "analytics" ? (
-        <SheetAnalytics />
+        <SheetAnalytics group={group} />
       ) : page === "customers" ? (
-        <Customers />
+        <Customers group={group} />
       ) : page === "transfers" ? (
         <BankTransfers />
       ) : (
-        <Dashboard />
+        <Dashboard group={group} />
+      )}
+      {addStep === "ask" && (
+        <LogoutConfirm
+          busy={false}
+          title="Are you sure to Create a New Group?"
+          yesLabel="YES"
+          noLabel="NO"
+          onYes={() => setAddStep("name")}
+          onNo={() => setAddStep("")}
+        />
+      )}
+      {addStep === "name" && (
+        <GroupNameDialog
+          name={groupName}
+          error={groupError}
+          busy={creating}
+          onChange={setGroupName}
+          onCancel={() => { if (!creating) { setAddStep(""); setGroupName(""); } }}
+          onCreate={createGroup}
+        />
       )}
       {confirmLogout && (
         <LogoutConfirm busy={loggingOut} onYes={logout} onNo={() => setConfirmLogout(false)} />
@@ -114,7 +191,7 @@ export default function App() {
   );
 }
 
-function LogoutConfirm({ busy, onYes, onNo }) {
+function LogoutConfirm({ busy, title = "Are you sure to log out", yesLabel = "Yes", noLabel = "No", onYes, onNo }) {
   useEffect(() => lockPageScroll(), []);
 
   useEffect(() => {
@@ -133,13 +210,35 @@ function LogoutConfirm({ busy, onYes, onNo }) {
       }}
     >
       <div className="modal logout-dialog" role="dialog" aria-modal="true" aria-labelledby="logout-title">
-        <h2 id="logout-title">Are you sure to log out</h2>
+        <h2 id="logout-title">{title}</h2>
         <div className="logout-actions">
           <button type="button" className="modal-close" onClick={onNo} disabled={busy}>
-            No
+            {noLabel}
           </button>
           <button type="button" className="logout-yes" onClick={onYes} disabled={busy}>
-            Yes
+            {yesLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function GroupNameDialog({ name, error, busy, onChange, onCancel, onCreate }) {
+  useEffect(() => lockPageScroll(), []);
+  return (
+    <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onCancel(); }}>
+      <div className="modal logout-dialog" role="dialog" aria-modal="true">
+        <h2>Enter the Group Name</h2>
+        <label className="group-name-field">
+          Group name
+          <input value={name} onChange={(event) => onChange(event.target.value)} autoFocus />
+        </label>
+        {error && <p className="sheet-url-note is-error">{error}</p>}
+        <div className="logout-actions">
+          <button type="button" className="modal-close" onClick={onCancel} disabled={busy}>Cancel</button>
+          <button type="button" className="logout-yes" onClick={onCreate} disabled={busy || !name.trim()}>
+            {busy ? "Creating…" : "Create Group"}
           </button>
         </div>
       </div>

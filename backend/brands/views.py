@@ -37,13 +37,19 @@ from brands.services import (
 )
 
 
+def _chosen_group(request, body: bool = False) -> str:
+    source = request.data if body else request.query_params
+    return str(source.get("group") or "KABOOM77").strip() or "KABOOM77"
+
+
 class GoogleSheetView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        return Response(public_status())
+        return Response(public_status(_chosen_group(request)))
 
     def post(self, request):
+        group = _chosen_group(request, body=True)
         try:
             if "deposit_start_row" in request.data or "withdraw_start_row" in request.data:
                 save_start_rows(
@@ -52,9 +58,10 @@ class GoogleSheetView(APIView):
                     request.data.get("slot") or 1,
                     request.data.get("deposit_end_row"),
                     request.data.get("withdraw_end_row"),
+                    group,
                 )
             else:
-                save_sheet_url(str(request.data.get("sheet_url") or ""), request.data.get("slot") or 1)
+                save_sheet_url(str(request.data.get("sheet_url") or ""), request.data.get("slot") or 1, group)
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=400)
         except Exception as exc:
@@ -63,12 +70,12 @@ class GoogleSheetView(APIView):
         written = 0
         if "sheet_url" in request.data:
             try:
-                written = export_pending(slot=request.data.get("slot") or 1)
+                written = export_pending(slot=request.data.get("slot") or 1, group=group)
             except Exception as exc:
                 message = str(exc).splitlines()[0][:500] or "The Google Sheet could not be saved."
                 return Response({"detail": message}, status=500)
         try:
-            body = public_status()
+            body = public_status(group)
         except Exception as exc:
             message = str(exc).splitlines()[0][:500] or "The Google Sheet could not be saved."
             return Response({"detail": message}, status=500)
@@ -81,10 +88,10 @@ class GoogleSheetBlockView(APIView):
 
     def post(self, request):
         try:
-            set_sheet_blocked(request.data.get("slot") or 1, request.data.get("blocked"))
+            set_sheet_blocked(request.data.get("slot") or 1, request.data.get("blocked"), _chosen_group(request, True))
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=400)
-        return Response(public_status())
+        return Response(public_status(_chosen_group(request, True)))
 
 
 class GoogleSheetClearView(APIView):
@@ -92,10 +99,10 @@ class GoogleSheetClearView(APIView):
 
     def post(self, request):
         try:
-            clear_blocked_sheet(request.data.get("slot") or 1)
+            clear_blocked_sheet(request.data.get("slot") or 1, _chosen_group(request, True))
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=400)
-        return Response(public_status())
+        return Response(public_status(_chosen_group(request, True)))
 
 
 class GoogleSheetAutoSyncView(APIView):
@@ -103,10 +110,10 @@ class GoogleSheetAutoSyncView(APIView):
 
     def post(self, request):
         try:
-            set_sheet_auto_sync(request.data.get("slot") or 1, request.data.get("auto_sync"))
+            set_sheet_auto_sync(request.data.get("slot") or 1, request.data.get("auto_sync"), _chosen_group(request, True))
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=400)
-        return Response(public_status())
+        return Response(public_status(_chosen_group(request, True)))
 
 
 class GoogleSheetWritesView(APIView):
@@ -118,10 +125,11 @@ class GoogleSheetWritesView(APIView):
                 request.data.get("slot") or 1,
                 request.data.get("deposits_enabled") if "deposits_enabled" in request.data else None,
                 request.data.get("withdrawals_enabled") if "withdrawals_enabled" in request.data else None,
+                _chosen_group(request, True),
             )
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=400)
-        return Response(public_status())
+        return Response(public_status(_chosen_group(request, True)))
 
 
 class GoogleSheetSyncView(APIView):
@@ -130,7 +138,7 @@ class GoogleSheetSyncView(APIView):
     def post(self, request):
         day = _parse_day(request.data.get("date"))
         try:
-            result = sync_brands_for_day(day, request.data.get("slot") or 1)
+            result = sync_brands_for_day(day, request.data.get("slot") or 1, _chosen_group(request, True))
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=400)
         except Exception as exc:
@@ -146,11 +154,12 @@ class SheetPipelineView(APIView):
 
     def get(self, request):
         day = _parse_day(request.query_params.get("date"))
+        group = _chosen_group(request)
         sheets = [
-            row for row in GoogleSheetSetting.objects.filter(slot__in=(1, 2, 3)).order_by("slot")
+            row for row in GoogleSheetSetting.objects.filter(group=group, slot__in=(1, 2, 3)).order_by("slot")
             if (row.sheet_url or "").strip() and not row.blocked
         ]
-        stored = Transaction.objects.filter(txn_date=day, brand__is_active=True)
+        stored = Transaction.objects.filter(txn_date=day, brand__is_active=True, brand__group=group)
         received = list(
             stored.filter(type__in=["DEPOSIT", "WITHDRAW"])
             .select_related("brand")
@@ -265,10 +274,11 @@ class SheetAnalyticsView(APIView):
 
     def get(self, request):
         day = _parse_day(request.query_params.get("date"))
-        sheets = list(GoogleSheetSetting.objects.filter(slot__in=(1, 2, 3)).order_by("slot"))
+        sheets = list(GoogleSheetSetting.objects.filter(group=_chosen_group(request), slot__in=(1, 2, 3)).order_by("slot"))
         saved = [row for row in sheets if (row.sheet_url or "").strip()]
+        group = _chosen_group(request)
         transactions = (
-            Transaction.objects.filter(txn_date=day, type__in=["DEPOSIT", "WITHDRAW"], brand__is_active=True)
+            Transaction.objects.filter(txn_date=day, type__in=["DEPOSIT", "WITHDRAW"], brand__is_active=True, brand__group=group)
             .select_related("brand")
             .prefetch_related("sheet_exports")
             .order_by("-created_at", "-id")
@@ -497,7 +507,7 @@ class CustomersView(APIView):
         start_customer_sync()
         brand_name = str(request.query_params.get("brand") or "All")
         query = str(request.query_params.get("q") or "")[:80]
-        return _live_response(customer_board(day, brand_name, query, _parse_page(request.query_params.get("page"))))
+        return _live_response(customer_board(day, brand_name, query, _parse_page(request.query_params.get("page")), _chosen_group(request)))
 
 
 class TransactionDetailView(APIView):
@@ -603,8 +613,7 @@ def _dashboard_body(
     brands_meta = packed.get("brands") or []
     group_name = (group_name or "All").strip() or "All"
     if group_name != "All":
-        known = {choice for choice, _label in Brand.GROUPS}
-        if group_name in known:
+        if GroupSetting.objects.filter(code=group_name).exists() or group_name in {choice for choice, _label in Brand.GROUPS}:
             allowed = set(Brand.objects.filter(is_active=True, group=group_name).values_list("name", flat=True))
         else:
             allowed = set()
@@ -774,21 +783,47 @@ def _kaboom_google_email() -> str:
     return str(payload.get("client_email") or "").strip()
 
 
+class GroupListView(APIView):
+    """Main groups. Creating one does not change KABOOM77 sheets or brands."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        GroupSetting.objects.get_or_create(code="KABOOM77")
+        codes = list(GroupSetting.objects.order_by("code").values_list("code", flat=True))
+        codes.sort(key=lambda code: (code != "KABOOM77", code.casefold()))
+        return Response({"groups": codes})
+
+    def post(self, request):
+        name = " ".join(str(request.data.get("name") or "").split())
+        if not name:
+            return Response({"detail": "Enter a group name."}, status=400)
+        if len(name) > 64:
+            return Response({"detail": "Use a group name of 64 characters or less."}, status=400)
+        if GroupSetting.objects.filter(code__iexact=name).exists():
+            return Response({"detail": "That group already exists."}, status=400)
+        GroupSetting.objects.create(code=name)
+        from brands.sheets import ensure_sheet_slots
+        ensure_sheet_slots(name)
+        return Response({"code": name})
+
+
 class SystemSettingsView(APIView):
     """Group Google account and brand API keys. Does not start or stop the live writer."""
 
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        code = str(request.query_params.get("group") or "KABOOM77").strip() or "KABOOM77"
-        if code != "KABOOM77":
+        code = _chosen_group(request)
+        if not GroupSetting.objects.filter(code=code).exists() and code != "KABOOM77":
             code = "KABOOM77"
+        GroupSetting.objects.get_or_create(code=code)
         return Response({"groups": [_group_settings(code)]})
 
     def post(self, request):
         code = str(request.data.get("group") or "").strip()
-        if code not in {"KABOOM77", "BETMETH"}:
-            return Response({"detail": "Choose KABOOM77 or BETMETH."}, status=400)
+        if not code or not GroupSetting.objects.filter(code=code).exists():
+            return Response({"detail": "Choose a group that exists."}, status=400)
         setting, _created = GroupSetting.objects.get_or_create(code=code)
         email = str(request.data.get("google_email") or "").strip()
         if email:
@@ -807,7 +842,7 @@ class SystemSettingsView(APIView):
         brand = Brand.objects.filter(group=code, name=name).first()
         if brand is None:
             return Response({"detail": "That API key was not found."}, status=404)
-        if brand.is_active:
+        if brand.is_active and code == "KABOOM77":
             return Response(
                 {"detail": f"{brand.name} is the running API key. It stays in place so live writing is not stopped."},
                 status=400,
@@ -864,7 +899,7 @@ def _save_group_brand(code: str, body: dict):
             merchant_id=merchant_id[:32],
             token=token[:128],
             group=code,
-            is_active=code == "KABOOM77",
+            is_active=True,
         )
         _write_brand_env(name, domain, access_id[:32], merchant_id[:32], token[:128])
         return None

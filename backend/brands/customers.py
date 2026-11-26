@@ -44,9 +44,9 @@ def start_customer_sync() -> None:
     threading.Thread(target=_loop, name="customer-sync", daemon=True).start()
 
 
-def customer_board(day: date, brand_name: str, query: str, page: int) -> dict:
+def customer_board(day: date, brand_name: str, query: str, page: int, group_name: str = "KABOOM77") -> dict:
     """Registered customers, who played that day, and who joined that day."""
-    brands, missing = _scoped_brands(brand_name)
+    brands, missing = _scoped_brands(brand_name, group_name)
     if missing:
         empty = _empty_registered(page)
         return {
@@ -627,8 +627,8 @@ def _customer_row(item: Customer) -> dict:
     }
 
 
-def _scoped_brands(brand_name: str) -> tuple[list[Brand], bool]:
-    qs = Brand.objects.filter(is_active=True).exclude(token="").exclude(merchant_id="").order_by("sort_order", "name")
+def _scoped_brands(brand_name: str, group_name: str = "KABOOM77") -> tuple[list[Brand], bool]:
+    qs = Brand.objects.filter(is_active=True, group=group_name).exclude(token="").exclude(merchant_id="").order_by("sort_order", "name")
     name = (brand_name or "All").strip() or "All"
     if name == "All":
         return list(qs), False

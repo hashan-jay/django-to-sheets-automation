@@ -8,7 +8,7 @@ const EMPTY = {
   rows: [],
 };
 
-export default function SheetAnalytics() {
+export default function SheetAnalytics({ group = "KABOOM77" }) {
   const [date, setDate] = useState(today);
   const [data, setData] = useState(EMPTY);
   const [error, setError] = useState("");
@@ -22,7 +22,7 @@ export default function SheetAnalytics() {
     let cancel = false;
     setLoading(true);
     setError("");
-    api(`/api/sheet-analytics/?date=${encodeURIComponent(date)}`)
+    api(`/api/sheet-analytics/?date=${encodeURIComponent(date)}&group=${encodeURIComponent(group)}`)
       .then((body) => {
         if (!cancel) setData(body || EMPTY);
       })
@@ -35,7 +35,7 @@ export default function SheetAnalytics() {
     return () => {
       cancel = true;
     };
-  }, [date]);
+  }, [date, group]);
 
   const activeSheets = (data.sheets || []).filter((item) => item.saved);
   const brands = useMemo(() => [...new Set((data.rows || []).map((row) => row.brand).filter(Boolean))].sort(), [data]);

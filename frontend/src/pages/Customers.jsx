@@ -35,7 +35,7 @@ const EMPTY = {
   errors: [],
 };
 
-export default function Customers() {
+export default function Customers({ group = "KABOOM77" }) {
   const [brands, setBrands] = useState([]);
   const [brand, setBrand] = useState("All");
   const [date, setDate] = useState(today);
@@ -69,6 +69,7 @@ export default function Customers() {
       const params = new URLSearchParams({
         date,
         brand,
+        group,
         q,
         page: String(page),
       });
@@ -95,7 +96,7 @@ export default function Customers() {
       stopped = true;
       window.clearInterval(timer);
     };
-  }, [date, brand, q, page]);
+  }, [date, brand, q, page, group]);
 
   const registered = data.registered || EMPTY.registered;
   const played = data.played || EMPTY.played;

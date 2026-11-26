@@ -513,6 +513,22 @@ button {
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
+.brand-lockup { display: flex; align-items: center; gap: 16px; }
+.group-switch { display: flex; align-items: center; gap: 6px; }
+.group-switch button, .group-add {
+  height: 32px;
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 999px;
+  background: transparent;
+  color: #fff;
+  padding: 0 12px;
+  font-weight: 750;
+  cursor: pointer;
+}
+.group-switch button.is-selected { background: #fff; color: #0f172a; }
+.group-add { width: 32px; padding: 0; font-size: 20px; line-height: 1; }
+.group-name-field { display: flex; flex-direction: column; gap: 6px; margin: 12px 0; font-size: 12px; font-weight: 750; color: #475569; }
+.group-name-field input { height: 38px; border: 1px solid #dbe4ee; border-radius: 10px; padding: 0 10px; }
 .brand-home {
   border: 0;
   padding: 0;

@@ -82,16 +82,16 @@ def _slot_number(raw) -> int:
     return slot
 
 
-def ensure_sheet_slots() -> None:
-    sheet_setting(1)
-    for slot in (2, 3):
-        GoogleSheetSetting.objects.get_or_create(slot=slot, defaults={"sheet_url": "", "blocked": False})
+def ensure_sheet_slots(group: str = "KABOOM77") -> None:
+    for slot in SHEET_SLOTS:
+        sheet_setting(slot, group)
 
 
-def sheet_setting(slot: int = 1) -> GoogleSheetSetting:
+def sheet_setting(slot: int = 1, group: str = "KABOOM77") -> GoogleSheetSetting:
     slot = _slot_number(slot)
-    defaults = {"sheet_url": DEFAULT_SHEET_URL if slot == 1 else "", "blocked": False}
-    row, _created = GoogleSheetSetting.objects.get_or_create(slot=slot, defaults=defaults)
+    group = (group or "KABOOM77").strip() or "KABOOM77"
+    defaults = {"sheet_url": DEFAULT_SHEET_URL if slot == 1 and group == "KABOOM77" else "", "blocked": False}
+    row, _created = GoogleSheetSetting.objects.get_or_create(slot=slot, group=group, defaults=defaults)
     return row
 
 
@@ -99,20 +99,20 @@ def active_sheet_settings() -> list[GoogleSheetSetting]:
     """Sheets that should receive live writes: a saved link, and not blocked."""
     ensure_sheet_slots()
     rows = []
-    for row in GoogleSheetSetting.objects.filter(slot__in=SHEET_SLOTS).order_by("slot"):
+    for row in GoogleSheetSetting.objects.filter(slot__in=SHEET_SLOTS).order_by("group", "slot"):
         if row.blocked or not row.auto_sync or not normalize_google_sheet_id(row.sheet_url):
             continue
         rows.append(row)
     return rows
 
 
-def save_sheet_url(raw: str, slot_raw=1) -> GoogleSheetSetting:
+def save_sheet_url(raw: str, slot_raw=1, group: str = "KABOOM77") -> GoogleSheetSetting:
     slot = _slot_number(slot_raw)
     text = str(raw or "").strip()
     sheet_id = normalize_google_sheet_id(text)
     if text and not sheet_id:
         raise ValueError("Paste a Google Sheets link, or clear the field to stop writing.")
-    row = sheet_setting(slot)
+    row = sheet_setting(slot, group)
     if row.blocked:
         raise ValueError(f"Unblock {sheet_label(slot)} before changing its link.")
     gid = worksheet_gid(text)
@@ -126,10 +126,10 @@ def save_sheet_url(raw: str, slot_raw=1) -> GoogleSheetSetting:
     return row
 
 
-def set_sheet_blocked(slot_raw, blocked_raw) -> GoogleSheetSetting:
+def set_sheet_blocked(slot_raw, blocked_raw, group: str = "KABOOM77") -> GoogleSheetSetting:
     slot = _slot_number(slot_raw)
     blocked = blocked_raw is True or str(blocked_raw).strip().lower() in {"1", "true", "yes", "on"}
-    row = sheet_setting(slot)
+    row = sheet_setting(slot, group)
     if blocked and not normalize_google_sheet_id(row.sheet_url):
         raise ValueError(f"Save a link for {sheet_label(slot)} before blocking it.")
     row.blocked = blocked
@@ -140,10 +140,10 @@ def set_sheet_blocked(slot_raw, blocked_raw) -> GoogleSheetSetting:
     return row
 
 
-def clear_blocked_sheet(slot_raw) -> GoogleSheetSetting:
+def clear_blocked_sheet(slot_raw, group: str = "KABOOM77") -> GoogleSheetSetting:
     """Remove the saved link and return that card to an open sheet with no link."""
     slot = _slot_number(slot_raw)
-    row = sheet_setting(slot)
+    row = sheet_setting(slot, group)
     if not row.blocked:
         raise ValueError(f"Block {sheet_label(slot)} before clearing its link.")
     row.sheet_url = ""
@@ -154,10 +154,10 @@ def clear_blocked_sheet(slot_raw) -> GoogleSheetSetting:
     return row
 
 
-def set_sheet_auto_sync(slot_raw, enabled_raw) -> GoogleSheetSetting:
+def set_sheet_auto_sync(slot_raw, enabled_raw, group: str = "KABOOM77") -> GoogleSheetSetting:
     slot = _slot_number(slot_raw)
     enabled = enabled_raw is True or str(enabled_raw).strip().lower() in {"1", "true", "yes", "on"}
-    row = sheet_setting(slot)
+    row = sheet_setting(slot, group)
     if enabled and not normalize_google_sheet_id(row.sheet_url):
         raise ValueError(f"Save a link for {sheet_label(slot)} before turning Auto Sync on.")
     row.auto_sync = enabled
@@ -181,7 +181,7 @@ def _optional_row(raw, label: str) -> int:
     return number
 
 
-def save_start_rows(deposit_raw, withdraw_raw, slot_raw=1, deposit_end_raw=None, withdraw_end_raw=None) -> GoogleSheetSetting:
+def save_start_rows(deposit_raw, withdraw_raw, slot_raw=1, deposit_end_raw=None, withdraw_end_raw=None, group: str = "KABOOM77") -> GoogleSheetSetting:
     """Same bounds as finance-automation: deposits must start before withdrawals."""
     try:
         deposit = int(str(deposit_raw).strip())
@@ -212,10 +212,10 @@ def save_start_rows(deposit_raw, withdraw_raw, slot_raw=1, deposit_end_raw=None,
     return row
 
 
-def set_sheet_writes(slot_raw, deposits_raw=None, withdrawals_raw=None) -> GoogleSheetSetting:
+def set_sheet_writes(slot_raw, deposits_raw=None, withdrawals_raw=None, group: str = "KABOOM77") -> GoogleSheetSetting:
     """Turn new deposit rows or new withdrawal rows off for one spreadsheet only."""
     slot = _slot_number(slot_raw)
-    row = sheet_setting(slot)
+    row = sheet_setting(slot, group)
     fields = ["last_error", "updated_at"]
     if deposits_raw is not None:
         row.deposits_enabled = deposits_raw is True or str(deposits_raw).strip().lower() in {"1", "true", "yes", "on"}
@@ -270,13 +270,17 @@ def _fill_missing_sheet_names() -> None:
         GoogleSheetSetting.objects.filter(pk=row.pk, sheet_name="").update(sheet_name=title)
 
 
-def public_status() -> dict:
-    ensure_sheet_slots()
-    GoogleSheetSetting.objects.filter(last_error__contains="Quota exceeded").update(last_error="")
-    GoogleSheetSetting.objects.filter(last_error__contains="[429]").update(last_error="")
+def public_status(group: str = "KABOOM77") -> dict:
+    group = (group or "KABOOM77").strip() or "KABOOM77"
+    ensure_sheet_slots(group)
+    GoogleSheetSetting.objects.filter(group=group, last_error__contains="Quota exceeded").update(last_error="")
+    GoogleSheetSetting.objects.filter(group=group, last_error__contains="[429]").update(last_error="")
     _fill_missing_sheet_names()
-    row = sheet_setting(1)
-    sheets = [_sheet_public(item) for item in GoogleSheetSetting.objects.filter(slot__in=SHEET_SLOTS).order_by("slot")]
+    row = sheet_setting(1, group)
+    sheets = [
+        _sheet_public(item)
+        for item in GoogleSheetSetting.objects.filter(group=group, slot__in=SHEET_SLOTS).order_by("slot")
+    ]
     return {
         "sheet_url": row.sheet_url,
         "blocked": bool(row.blocked),
@@ -290,19 +294,19 @@ def public_status() -> dict:
     }
 
 
-def sync_brands_for_day(day, slot_raw=1) -> dict:
+def sync_brands_for_day(day, slot_raw=1, group: str = "KABOOM77") -> dict:
     """Write every deposit and withdrawal for the day, then compare counts with the sheet."""
     slot = _slot_number(slot_raw)
     if not _lock.acquire(timeout=180):
         raise ValueError("A Google Sheet sync is already running.")
     try:
-        return _sync_brands_for_day(day, slot)
+        return _sync_brands_for_day(day, slot, group)
     finally:
         _lock.release()
 
 
-def _sync_brands_for_day(day, slot: int) -> dict:
-    row = sheet_setting(slot)
+def _sync_brands_for_day(day, slot: int, group: str = "KABOOM77") -> dict:
+    row = sheet_setting(slot, group)
     sheet_id = normalize_google_sheet_id(row.sheet_url)
     if not sheet_id:
         raise ValueError(f"Save a link for {sheet_label(slot)} first.")
@@ -312,6 +316,7 @@ def _sync_brands_for_day(day, slot: int) -> dict:
             status="COMPLETED",
             type__in=_enabled_types(row),
             brand__is_active=True,
+            brand__group=group,
         )
         .select_related("brand")
         .order_by("created_at", "id")
@@ -483,7 +488,7 @@ def _writer_loop() -> None:
             close_old_connections()
 
 
-def export_pending(limit: int = 200, slot=None) -> int:
+def export_pending(limit: int = 200, slot=None, group: str | None = None) -> int:
     """Append rows that have not been written yet.
 
     Returns the number written, 0 when nothing is waiting, or -1 when another
@@ -494,22 +499,24 @@ def export_pending(limit: int = 200, slot=None) -> int:
     if not _lock.acquire(blocking=False):
         return -1
     try:
-        return _export_pending(limit, None if slot is None else _slot_number(slot))
+        return _export_pending(limit, None if slot is None else _slot_number(slot), group)
     finally:
         _lock.release()
 
 
-def _export_pending(limit: int, only_slot: int | None = None) -> int:
+def _export_pending(limit: int, only_slot: int | None = None, group: str | None = None) -> int:
     sheets = active_sheet_settings()
     if only_slot is not None:
         sheets = [row for row in sheets if row.slot == only_slot]
+    if group:
+        sheets = [row for row in sheets if (row.group or "KABOOM77") == group]
     if not sheets:
         return 0
     written_total = 0
     for row in sheets:
         deposit_start = row.deposit_start_row or DEFAULT_DEPOSIT_START
         withdraw_start = row.withdraw_start_row or DEFAULT_WITHDRAW_START
-        pending = _pending_for_sheet(row.slot, limit, _enabled_types(row))
+        pending = _pending_for_sheet(row.slot, limit, _enabled_types(row), row.group or "KABOOM77")
         if not pending:
             continue
         try:
@@ -547,13 +554,18 @@ def _enabled_types(row: GoogleSheetSetting) -> list[str]:
     return types
 
 
-def _pending_for_sheet(slot: int, limit: int, types: list[str] | None = None) -> list[Transaction]:
+def _pending_for_sheet(slot: int, limit: int, types: list[str] | None = None, group: str = "KABOOM77") -> list[Transaction]:
     """Today's missing rows go out before older days, so the live count can match the sheet."""
     allowed = types if types is not None else ["DEPOSIT", "WITHDRAW"]
     if not allowed:
         return []
     base = (
-        Transaction.objects.filter(status="COMPLETED", type__in=allowed, brand__is_active=True)
+        Transaction.objects.filter(
+            status="COMPLETED",
+            type__in=allowed,
+            brand__is_active=True,
+            brand__group=group,
+        )
         .exclude(sheet_exports__slot=slot)
         .select_related("brand")
     )

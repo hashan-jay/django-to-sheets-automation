@@ -180,9 +180,8 @@ function BrandMenu({ value, brands, onChange }) {
   );
 }
 
-export default function Dashboard() {
+export default function Dashboard({ group = "KABOOM77" }) {
   const [brands, setBrands] = useState([]);
-  const [group] = useState("KABOOM77");
   const [sheets, setSheets] = useState(() => emptySheets());
   const [rowsBusy, setRowsBusy] = useState(0);
   const [sheetNote, setSheetNote] = useState("");
@@ -217,14 +216,14 @@ export default function Dashboard() {
     api("/api/brands/")
       .then(setBrands)
       .catch((err) => setError(err.message));
-    api("/api/google-sheet/")
+    api(`/api/google-sheet/?group=${encodeURIComponent(group)}`)
       .then((sheet) => {
         setSheets(sheetsFromStatus(sheet));
         setSheetNote(sheet.last_error || "");
         setSheetNoteOk(!sheet.last_error);
       })
       .catch(() => {});
-  }, []);
+  }, [group]);
 
   function updateSheetRow(slot, field, value) {
     setSheets((current) => current.map((item) => (item.slot === slot ? { ...item, [field]: value.replace(/[^\d]/g, "") } : item)));
@@ -245,6 +244,7 @@ export default function Dashboard() {
           deposit_end_row: String(current?.deposit_end_row || "").trim(),
           withdraw_start_row: String(current?.withdraw_start_row || "1000").trim(),
           withdraw_end_row: String(current?.withdraw_end_row || "").trim(),
+          group,
         },
       });
       setSheets(sheetsFromStatus(saved));
@@ -264,7 +264,7 @@ export default function Dashboard() {
     setSheetNote("");
     setSheetNoteOk(false);
     try {
-      const result = await api("/api/google-sheet/sync/", { method: "POST", body: { date, slot } });
+      const result = await api("/api/google-sheet/sync/", { method: "POST", body: { date, slot, group } });
       setSheetNote(result.detail || `Google Sheet ${slot} sync finished.`);
       setSheetNoteOk(Boolean(result.ok));
     } catch (err) {
@@ -280,7 +280,7 @@ export default function Dashboard() {
     setSheetNote("");
     setSheetNoteOk(false);
     try {
-      const saved = await api("/api/google-sheet/auto-sync/", { method: "POST", body: { slot, auto_sync: enabled } });
+      const saved = await api("/api/google-sheet/auto-sync/", { method: "POST", body: { slot, auto_sync: enabled, group } });
       setSheets(sheetsFromStatus(saved));
       setSheetNote(enabled
         ? `Google Sheet ${slot} Auto Sync is on. New transactions are written as they arrive.`
@@ -298,7 +298,7 @@ export default function Dashboard() {
     setSheetWrites(`${slot}-${kind}`);
     setSheetNote("");
     setSheetNoteOk(false);
-    const body = { slot };
+    const body = { slot, group };
     if (kind === "deposits") body.deposits_enabled = enabled;
     else body.withdrawals_enabled = enabled;
     const label = kind === "deposits" ? "Deposits" : "Withdrawals";
@@ -322,7 +322,7 @@ export default function Dashboard() {
     setSheetNote("");
     setSheetNoteOk(false);
     try {
-      const saved = await api("/api/google-sheet/block/", { method: "POST", body: { slot, blocked } });
+      const saved = await api("/api/google-sheet/block/", { method: "POST", body: { slot, blocked, group } });
       setSheets(sheetsFromStatus(saved));
       setSheetNote(blocked ? `Google Sheet ${slot} is blocked. Writing is paused.` : `Google Sheet ${slot} is unblocked. Writing is live again.`);
       setSheetNoteOk(true);
@@ -339,7 +339,7 @@ export default function Dashboard() {
     setSheetNote("");
     setSheetNoteOk(false);
     try {
-      const saved = await api("/api/google-sheet/clear/", { method: "POST", body: { slot } });
+      const saved = await api("/api/google-sheet/clear/", { method: "POST", body: { slot, group } });
       setSheets(sheetsFromStatus(saved));
       setSheetNote(`Google Sheet ${slot} link was cleared. Paste a new link and save it.`);
       setSheetNoteOk(true);
@@ -382,7 +382,7 @@ export default function Dashboard() {
     try {
       const saved = await api("/api/google-sheet/", {
         method: "POST",
-        body: { sheet_url: (current?.sheet_url || "").trim(), slot },
+        body: { sheet_url: (current?.sheet_url || "").trim(), slot, group },
       });
       setSheets(sheetsFromStatus(saved));
       const savedSheet = (saved.sheets || []).find((item) => item.slot === slot);
@@ -752,7 +752,7 @@ export default function Dashboard() {
       )}
     </div>
     </section>
-    <SheetPipeline date={date} live={live} revision={data?.revision || ""} />
+    <SheetPipeline date={date} live={live} revision={data?.revision || ""} group={group} />
     <BankLedger date={date} group={group} brand={brand} revision={data?.revision || ""} />
     <div className="workspace">
       <section className="main" ref={tableRef}>
@@ -1306,7 +1306,7 @@ const LEDGER_CARDS = [
   ["cash_out", "Cash out", "money"],
 ];
 
-function SheetPipeline({ date, live, revision }) {
+function SheetPipeline({ date, live, revision, group = "KABOOM77" }) {
   const [board, setBoard] = useState(null);
   const [kind, setKind] = useState("ALL");
   const [freshWritten, setFreshWritten] = useState(() => new Set());
@@ -1316,7 +1316,7 @@ function SheetPipeline({ date, live, revision }) {
   useEffect(() => {
     let cancel = false;
     function load() {
-      const params = new URLSearchParams({ date, type: kind });
+      const params = new URLSearchParams({ date, type: kind, group });
       api(`/api/sheet-pipeline/?${params.toString()}`)
         .then((body) => {
           if (cancel) return;
@@ -1346,7 +1346,7 @@ function SheetPipeline({ date, live, revision }) {
       cancel = true;
       window.clearInterval(timer);
     };
-  }, [date, live, revision, kind]);
+  }, [date, live, revision, kind, group]);
 
   const received = board?.received || { got: 0, total: 0, rows: [] };
   const pending = board?.pending || { got: 0, total: 0, rows: [] };

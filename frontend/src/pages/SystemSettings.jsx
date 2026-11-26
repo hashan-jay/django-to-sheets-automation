@@ -4,7 +4,7 @@ import { lockPageScroll } from "./Dashboard";
 
 const EMPTY_BRAND = { name: "", domain: "", access_id: "", merchant_id: "", token: "" };
 
-export default function SystemSettings() {
+export default function SystemSettings({ group = "KABOOM77" }) {
   const [groups, setGroups] = useState([]);
   const [drafts, setDrafts] = useState({});
   const [emails, setEmails] = useState({});
@@ -15,10 +15,10 @@ export default function SystemSettings() {
   const [removing, setRemoving] = useState(null);
 
   useEffect(() => {
-    api("/api/system-settings/?group=KABOOM77")
+    api(`/api/system-settings/?group=${encodeURIComponent(group)}`)
       .then((body) => applyGroups(body.groups || []))
       .catch((err) => setError(err.message));
-  }, []);
+  }, [group]);
 
   function applyGroups(next) {
     setGroups(next);
@@ -101,7 +101,7 @@ export default function SystemSettings() {
       <header className="users-head">
         <div>
           <h2>System Settings</h2>
-          <p>Google account and brand API keys for KABOOM77.</p>
+          <p>Google account and brand API keys for {group}.</p>
         </div>
       </header>
       {error && <p className="sheet-url-note is-error">{error}</p>}
