@@ -255,7 +255,7 @@ def save_start_rows(deposit_raw, withdraw_raw, slot_raw=1, deposit_end_raw=None,
         raise ValueError("The deposit end row must be from the deposit start through the row before withdrawals.")
     if withdraw_end and withdraw_end < withdraw:
         raise ValueError("The withdrawal end row must be the withdrawal start row or a row below it.")
-    row = sheet_setting(_slot_number(slot_raw))
+    row = sheet_setting(_slot_number(slot_raw), group)
     row.deposit_start_row = deposit
     row.deposit_end_row = deposit_end
     row.withdraw_start_row = withdraw
@@ -338,7 +338,11 @@ def public_status(group: str = "KABOOM77") -> dict:
         "sheet_url": row.sheet_url,
         "blocked": bool(row.blocked),
         "deposit_start_row": row.deposit_start_row or DEFAULT_DEPOSIT_START,
+        "deposit_end_row": row.deposit_end_row or 0,
         "withdraw_start_row": row.withdraw_start_row or DEFAULT_WITHDRAW_START,
+        "withdraw_end_row": row.withdraw_end_row or 0,
+        "deposits_enabled": bool(row.deposits_enabled),
+        "withdrawals_enabled": bool(row.withdrawals_enabled),
         "sheet_id": normalize_google_sheet_id(row.sheet_url),
         "last_error": row.last_error,
         "last_written_at": row.last_written_at.isoformat() if row.last_written_at else "",
